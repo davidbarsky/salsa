@@ -1,4 +1,7 @@
-use super::{memo::Memo, Configuration, IngredientImpl};
+use super::{
+    memo::{Memo, Value},
+    Configuration, IngredientImpl,
+};
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::{runtime::StampedValue, zalsa::ZalsaDatabase, AsDynDatabase as _, Id};
 
@@ -71,6 +74,7 @@ where
             zalsa_local,
             database_key_index,
             self.memo_ingredient_index,
+            self.initial_value(db),
         )?;
 
         // Push the query on the stack.
