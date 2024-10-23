@@ -1,6 +1,9 @@
 use super::{memo::Memo, Configuration, IngredientImpl};
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
-use crate::{runtime::StampedValue, zalsa::ZalsaDatabase, AsDynDatabase as _, Id};
+use crate::{
+    runtime::StampedValue, zalsa::ZalsaDatabase, zalsa_local::QueryRevisions, AsDynDatabase as _,
+    Id,
+};
 
 impl<C> IngredientImpl<C>
 where
@@ -87,6 +90,18 @@ where
                     return Some(self.extend_memo_lifetime(old_memo));
                 }
             }
+        }
+
+        if let Some(initial_value) = self.initial_value(db) {
+            self.insert_memo(
+                zalsa,
+                id,
+                Memo::new(
+                    Some(initial_value),
+                    zalsa.current_revision(),
+                    QueryRevisions::fixpoint_initial(database_key_index),
+                ),
+            );
         }
 
         Some(self.execute(db, active_query, opt_old_memo))
