@@ -26,6 +26,7 @@ where
             durability,
             changed_at,
             InputAccumulatedValues::from_map(&memo.revisions.accumulated),
+            &memo.revisions.cycle_heads,
         );
 
         value

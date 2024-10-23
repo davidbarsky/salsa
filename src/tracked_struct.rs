@@ -563,6 +563,7 @@ where
             data.durability,
             field_changed_at,
             InputAccumulatedValues::Empty,
+            &Default::default(),
         );
 
         unsafe { self.to_self_ref(&data.fields) }

@@ -190,6 +190,7 @@ impl<C: Configuration> IngredientImpl<C> {
             stamp.durability,
             stamp.changed_at,
             InputAccumulatedValues::Empty,
+            &Default::default(),
         );
         &value.fields
     }
