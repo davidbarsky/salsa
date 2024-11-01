@@ -79,7 +79,7 @@ where
             ClaimResult::Retry => return None,
             ClaimResult::Cycle => {
                 return self
-                    .initial_value(db)
+                    .initial_value(db, database_key_index.key_index)
                     .map(|initial_value| {
                         tracing::debug!(
                             "hit cycle at {database_key_index:#?}, \
