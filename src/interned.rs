@@ -1,5 +1,6 @@
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::durability::Durability;
+use crate::function::VerifyResult;
 use crate::id::AsId;
 use crate::ingredient::fmt_index;
 use crate::key::DependencyIndex;
@@ -221,8 +222,8 @@ where
         _db: &dyn Database,
         _input: Option<Id>,
         revision: Revision,
-    ) -> bool {
-        revision < self.reset_at
+    ) -> VerifyResult {
+        VerifyResult::changed_if(revision < self.reset_at)
     }
 
     fn cycle_recovery_strategy(&self) -> crate::cycle::CycleRecoveryStrategy {
