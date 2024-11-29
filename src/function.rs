@@ -37,7 +37,7 @@ pub trait Configuration: Any {
     /// The "salsa struct type" that this function is associated with.
     /// This can be just `salsa::Id` for functions that intern their arguments
     /// and are not clearly associated with any one salsa struct.
-    type SalsaStruct<'db>: SalsaStructInDb;
+    type SalsaStruct<'db>: SalsaStructInDb<'db>;
 
     /// The input to the function
     type Input<'db>: Send + Sync;

@@ -119,7 +119,7 @@ impl<C: Configuration> Jar for JarImpl<C> {
     }
 }
 
-pub trait TrackedStructInDb: SalsaStructInDb {
+pub trait TrackedStructInDb<'a>: SalsaStructInDb<'a> {
     /// Converts the identifier for this tracked struct into a `DatabaseKeyIndex`.
     fn database_key_index(db: &dyn Database, id: Id) -> DatabaseKeyIndex;
 }

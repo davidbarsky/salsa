@@ -98,7 +98,25 @@ macro_rules! setup_tracked_fn {
                     static $INTERN_CACHE: $zalsa::IngredientCache<$zalsa::interned::IngredientImpl<$Configuration>> =
                         $zalsa::IngredientCache::new();
 
-                    impl $zalsa::SalsaStructInDb for $InternedData<'_> {
+                    impl<'db> $zalsa::SalsaStructInDb<$db_lt> for $InternedData<$db_lt> {
+                        fn new<DB>(db: &DB, id: salsa::Id) -> $InternedData<$db_lt>
+                        where
+                            // FIXME(rust-lang/rust#65991): The `db` argument *should* have the type `dyn Database`
+                            DB: ?Sized + salsa::Database,
+                        {
+                            todo!()
+                        }
+
+                        fn ingredient_index<DB>(db: &DB) -> $zalsa::IngredientIndex
+                        where
+                            // FIXME(rust-lang/rust#65991): The `db` argument *should* have the type `dyn Database`
+                            DB: ?Sized + salsa::Database,
+                        {
+                            todo!()
+                            // use $zalsa::SalsaStruct as _;
+                            // use $zalsa::Ingredient as _;
+                            // $Configuration::fn_ingredient(db.as_dyn_database()).ingredient_index()
+                        }
                         fn lookup_ingredient_index(_aux: &dyn $zalsa::JarAux) -> core::option::Option<$zalsa::IngredientIndex> {
                             None
                         }

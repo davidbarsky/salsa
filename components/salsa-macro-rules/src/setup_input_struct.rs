@@ -123,7 +123,24 @@ macro_rules! setup_input_struct {
                 }
             }
 
-            impl $zalsa::SalsaStructInDb for $Struct {
+            impl $zalsa::SalsaStructInDb<'_> for $Struct {
+                fn new<$Db>(db: &$Db, id: salsa::Id) -> $Struct
+                where
+                    // FIXME(rust-lang/rust#65991): The `db` argument *should* have the type `dyn Database`
+                    $Db: ?Sized + salsa::Database,
+                {
+                    todo!()
+                }
+
+                fn ingredient_index<$Db>(db: &$Db) -> $zalsa::IngredientIndex
+                where
+                    // FIXME(rust-lang/rust#65991): The `db` argument *should* have the type `dyn Database`
+                    $Db: ?Sized + salsa::Database,
+                {
+                    use $zalsa::SalsaStructInDb as _;
+                    use $zalsa::Ingredient as _;
+                    $Configuration::ingredient(db.as_dyn_database()).ingredient_index()
+                }
                 fn lookup_ingredient_index(aux: &dyn $zalsa::JarAux) -> core::option::Option<$zalsa::IngredientIndex> {
                     aux.lookup_jar_by_type(&<$zalsa_struct::JarImpl<$Configuration>>::default())
                 }

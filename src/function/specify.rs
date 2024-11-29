@@ -17,7 +17,7 @@ where
     /// Used for explicit calls to `specify`, but not needed for pre-declared tracked struct fields.
     pub fn specify_and_record<'db>(&'db self, db: &'db C::DbView, key: Id, value: C::Output<'db>)
     where
-        C::Input<'db>: TrackedStructInDb,
+        C::Input<'db>: TrackedStructInDb<'db>,
     {
         let (zalsa, zalsa_local) = db.zalsas();
 

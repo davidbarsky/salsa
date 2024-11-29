@@ -140,7 +140,24 @@ macro_rules! setup_interned_struct {
                 }
             }
 
-            impl $zalsa::SalsaStructInDb for $Struct<'_> {
+            impl<$db_lt> $zalsa::SalsaStructInDb<$db_lt> for $Struct<$db_lt> {
+                fn new<DB>(db: &DB, id: salsa::Id) -> $Struct<$db_lt>
+                where
+                    // FIXME(rust-lang/rust#65991): The `db` argument *should* have the type `dyn Database`
+                    DB: ?Sized + salsa::Database,
+                {
+                    Self(id, std::marker::PhantomData)
+                }
+
+                fn ingredient_index<DB>(db: &DB) -> $zalsa::IngredientIndex
+                where
+                    // FIXME(rust-lang/rust#65991): The `db` argument *should* have the type `dyn Database`
+                    DB: ?Sized + salsa::Database,
+                {
+                    use $zalsa::SalsaStructInDb as _;
+                    use $zalsa::Ingredient as _;
+                    $Configuration::ingredient(db.as_dyn_database()).ingredient_index()
+                }
                 fn lookup_ingredient_index(aux: &dyn $zalsa::JarAux) -> core::option::Option<$zalsa::IngredientIndex> {
                     aux.lookup_jar_by_type(&<$zalsa_struct::JarImpl<$Configuration>>::default())
                 }
