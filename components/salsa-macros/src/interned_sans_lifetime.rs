@@ -69,6 +69,8 @@ impl SalsaStructAllowedOptions for InternedStruct {
     const HAS_LIFETIME: bool = false;
 
     const ALLOW_DEFAULT: bool = false;
+
+    const ALLOW_SELF_REF: bool = false;
 }
 
 struct Macro {
@@ -85,6 +87,7 @@ impl Macro {
         let attrs = &self.struct_item.attrs;
         let vis = &self.struct_item.vis;
         let struct_ident = &self.struct_item.ident;
+        let struct_data_ident = format_ident!("{}Data", struct_ident);
         let db_lt = db_lifetime::db_lifetime(&self.struct_item.generics);
         let new_fn = salsa_struct.constructor_name();
         let field_ids = salsa_struct.field_ids();
@@ -111,6 +114,7 @@ impl Macro {
                     attrs: [#(#attrs),*],
                     vis: #vis,
                     Struct: #struct_ident,
+                    StructData: #struct_data_ident,
                     db_lt: #db_lt,
                     id: #id,
                     new_fn: #new_fn,
