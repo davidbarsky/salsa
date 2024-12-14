@@ -10,7 +10,7 @@
 //!  |  +------------> query_b()
 //!  |                    |
 //!  +--------------------+
-//! ``````
+//! ```
 
 use salsa::CycleRecoveryAction;
 
@@ -25,7 +25,7 @@ const MAX: CycleValue = CycleValue(22);
 // Signal 1: T1 has entered `query_a`
 // Signal 2: T2 has entered `query_b`
 
-#[salsa::tracked(cycle_fn=query_a_cycle_fn, cycle_initial=query_a_initial)]
+#[salsa::tracked(cycle_fn=cycle_fn, cycle_initial=initial)]
 fn query_a(db: &dyn KnobsDatabase) -> CycleValue {
     db.signal(1);
 
@@ -35,19 +35,7 @@ fn query_a(db: &dyn KnobsDatabase) -> CycleValue {
     query_b(db)
 }
 
-fn query_a_cycle_fn(
-    _db: &dyn KnobsDatabase,
-    _value: &CycleValue,
-    _count: u32,
-) -> CycleRecoveryAction<CycleValue> {
-    CycleRecoveryAction::Iterate
-}
-
-fn query_a_initial(_db: &dyn KnobsDatabase) -> CycleValue {
-    MIN
-}
-
-#[salsa::tracked]
+#[salsa::tracked(cycle_fn=cycle_fn, cycle_initial=initial)]
 fn query_b(db: &dyn KnobsDatabase) -> CycleValue {
     // Wait for Thread T1 to enter `query_a` before we continue.
     db.wait_for(1);
@@ -56,6 +44,18 @@ fn query_b(db: &dyn KnobsDatabase) -> CycleValue {
 
     let a_value = query_a(db);
     CycleValue(a_value.0 + 1).min(MAX)
+}
+
+fn cycle_fn(
+    _db: &dyn KnobsDatabase,
+    _value: &CycleValue,
+    _count: u32,
+) -> CycleRecoveryAction<CycleValue> {
+    CycleRecoveryAction::Iterate
+}
+
+fn initial(_db: &dyn KnobsDatabase) -> CycleValue {
+    MIN
 }
 
 #[test]

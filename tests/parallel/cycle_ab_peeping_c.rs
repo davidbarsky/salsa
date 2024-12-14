@@ -65,7 +65,7 @@ fn query_c(db: &dyn KnobsDatabase) -> CycleValue {
     eprintln!("query_c()");
 
     // Wait until T1 has reached MID then execute `query_b`.
-    // This shoul block and (due to the configuration on our database) signal stage 2.
+    // This should block and (due to the configuration on our database) signal stage 2.
     db.wait_for(1);
 
     eprintln!("query_c: signaled");

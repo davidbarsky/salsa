@@ -85,6 +85,8 @@ where
                     "{database_key_index:?}: execute: \
                     I am a cycle head, comparing last provisional value with new value"
                 );
+                dbg!(&new_value);
+                dbg!(last_provisional_value);
                 // If the new result is equal to the last provisional result, the cycle has
                 // converged and we are done.
                 if !C::values_equal(&new_value, last_provisional_value) {
@@ -105,7 +107,6 @@ where
                                 "fixpoint iteration of {database_key_index:#?} should \
                                 converge before u32::MAX iterations",
                             );
-                            revisions.cycle_ignore = false;
                             opt_last_provisional = Some(self.insert_memo(
                                 zalsa,
                                 id,
@@ -121,19 +122,26 @@ where
                         }
                     }
                 }
+                iteration_count = iteration_count.checked_add(1).expect(
+                    "fixpoint iteration of {database_key_index:#?} should \
+                                converge before u32::MAX iterations",
+                );
+                if iteration_count > 10 {
+                    panic!("too much iteration");
+                }
                 // This is no longer a provisional result, it's our final result, so remove ourself
                 // from the cycle heads, and iterate one last time to remove ourself from all other
                 // results in the cycle as well and turn them into usable cached results.
-                // TODO Can we avoid doing this? the extra cycle is quite expensive if there is a
-                // nested cycle. Maybe track the relevant memos and replace them all with the cycle
-                // head removed? Or just let them keep the cycle head and allow cycle memos to be
-                // used when we are not actually iterating the cycle for that head?
+                // TODO Can we avoid doing this? the extra iteration is quite expensive if there is
+                // a nested cycle. Maybe track the relevant memos and replace them all with the
+                // cycle head removed? Or just let them keep the cycle head and allow cycle memos
+                // to be used when we are not actually iterating the cycle for that head?
                 tracing::debug!(
                     "{database_key_index:?}: execute: fixpoint iteration has a final value, \
                     one more iteration to remove cycle heads from memos"
                 );
                 revisions.cycle_heads.remove(&database_key_index);
-                revisions.cycle_ignore = false;
+                dbg!(&revisions.cycle_heads);
                 self.insert_memo(
                     zalsa,
                     id,
@@ -143,6 +151,7 @@ where
             }
 
             tracing::debug!("{database_key_index:?}: execute: result.revisions = {revisions:#?}");
+            dbg!(&new_value);
 
             // If the new value is equal to the old one, then it didn't
             // really change, even if some of its inputs have. So we can

@@ -121,6 +121,12 @@ impl<V> Memo<V> {
             revisions,
         }
     }
+
+    /// True if this is a provisional cycle-iteration result.
+    pub(super) fn is_provisional(&self) -> bool {
+        !self.revisions.cycle_heads.is_empty()
+    }
+
     /// True if this memo is known not to have changed based on its durability.
     pub(super) fn check_durability(&self, zalsa: &Zalsa) -> bool {
         let last_changed = zalsa.last_changed_revision(self.revisions.durability);

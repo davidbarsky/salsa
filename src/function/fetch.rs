@@ -54,6 +54,7 @@ where
         let memo_guard = self.get_memo_from_table_for(zalsa, id);
         if let Some(memo) = &memo_guard {
             if memo.value.is_some()
+                && !memo.is_provisional()
                 && self.shallow_verify_memo(db, zalsa, self.database_key_index(id), memo)
             {
                 // Unsafety invariant: memo is present in memo_map
@@ -78,6 +79,25 @@ where
         ) {
             ClaimResult::Retry => return None,
             ClaimResult::Cycle => {
+                dbg!("hit cycle for", database_key_index);
+                // check if there's a provisional value for this query
+                let memo_guard = self.get_memo_from_table_for(zalsa, id);
+                if let Some(memo) = &memo_guard {
+                    dbg!("found provisional value, shallow verifying it");
+                    if memo.value.is_some()
+                        && memo.revisions.cycle_heads.contains(&database_key_index)
+                        && self.shallow_verify_memo(db, zalsa, database_key_index, memo)
+                    {
+                        dbg!("verified provisional value, returning it");
+                        dbg!(&memo.value);
+                        // Unsafety invariant: memo is present in memo_map.
+                        unsafe {
+                            return Some(self.extend_memo_lifetime(memo));
+                        }
+                    }
+                }
+                // no provisional value; create/insert/return initial provisional value
+                dbg!("no provisional value found, checking for initial value");
                 return self
                     .initial_value(db, database_key_index.key_index)
                     .map(|initial_value| {
@@ -103,7 +123,7 @@ where
                             "dependency graph cycle querying {database_key_index:#?}; \
                              set cycle_fn/cycle_initial to fixpoint iterate"
                         )
-                    })
+                    });
             }
             ClaimResult::Claimed(guard) => guard,
         };

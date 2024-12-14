@@ -6,6 +6,7 @@ mod common;
 use common::{ExecuteValidateLoggerDatabase, LogDatabase};
 use expect_test::expect;
 use salsa::{CycleRecoveryAction, Database as Db, DatabaseImpl as DbImpl, Durability, Setter};
+use test_log::test;
 
 /// A vector of inputs a query can evaluate to get an iterator of u8 values to operate on.
 ///
@@ -59,11 +60,19 @@ impl Input {
             Self::MaxIterate(inputs) => max_iterate(db, inputs),
             Self::MinPanic(inputs) => min_panic(db, inputs),
             Self::MaxPanic(inputs) => max_panic(db, inputs),
-            Self::Successor(input) => input.eval(db) + 1,
+            Self::Successor(input) => {
+                let inval = input.eval(db);
+                if inval >= MIN_VALUE && inval <= MAX_VALUE {
+                    inval + 1
+                } else {
+                    inval
+                }
+            }
         }
     }
 
     fn assert(self, db: &dyn Db, expected: u8) {
+        dbg!("ASSERT");
         assert_eq!(self.eval(db), expected)
     }
 }
@@ -73,14 +82,14 @@ fn min_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> u8 {
     inputs.values(db).min().expect("empty inputs!")
 }
 
-const MIN_COUNT_FALLBACK: u8 = 100;
-const MIN_VALUE_FALLBACK: u8 = 5;
+const MIN_COUNT_FALLBACK: u8 = 4;
+const MIN_VALUE_FALLBACK: u8 = 7;
 const MIN_VALUE: u8 = 10;
 
 fn min_recover(_db: &dyn Db, value: &u8, count: u32, _inputs: Inputs) -> CycleRecoveryAction<u8> {
     if *value < MIN_VALUE {
         CycleRecoveryAction::Fallback(MIN_VALUE_FALLBACK)
-    } else if count > 10 {
+    } else if count > 3 {
         CycleRecoveryAction::Fallback(MIN_COUNT_FALLBACK)
     } else {
         CycleRecoveryAction::Iterate
@@ -96,14 +105,14 @@ fn max_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> u8 {
     inputs.values(db).max().expect("empty inputs!")
 }
 
-const MAX_COUNT_FALLBACK: u8 = 200;
-const MAX_VALUE_FALLBACK: u8 = 250;
+const MAX_COUNT_FALLBACK: u8 = 251;
+const MAX_VALUE_FALLBACK: u8 = 248;
 const MAX_VALUE: u8 = 245;
 
 fn max_recover(_db: &dyn Db, value: &u8, count: u32, _inputs: Inputs) -> CycleRecoveryAction<u8> {
     if *value > MAX_VALUE {
         CycleRecoveryAction::Fallback(MAX_VALUE_FALLBACK)
-    } else if count > 10 {
+    } else if count > 3 {
         CycleRecoveryAction::Fallback(MAX_COUNT_FALLBACK)
     } else {
         CycleRecoveryAction::Iterate
@@ -332,11 +341,11 @@ fn two_converge() {
     a.assert(&db, 250);
 }
 
-/// a:Xp(b) -> b:Xi(v10,c) -> c:Xp(sb)
+/// a:Xp(b) -> b:Xi(v20,c) -> c:Xp(sb)
 ///            ^                     |
 ///            +---------------------+
 ///
-/// Two-query cycle, falls back due to >10 iterations.
+/// Two-query cycle, falls back due to >3 iterations.
 #[test]
 fn two_fallback_count() {
     let mut db = DbImpl::new();
@@ -347,18 +356,18 @@ fn two_fallback_count() {
     let b = Input::MaxIterate(b_in);
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
-    b_in.set_inputs(&mut db).to(vec![Input::Value(10), c]);
+    b_in.set_inputs(&mut db).to(vec![Input::Value(20), c]);
     c_in.set_inputs(&mut db)
         .to(vec![Input::Successor(Box::new(b))]);
 
-    a.assert(&db, MAX_COUNT_FALLBACK + 1);
+    a.assert(&db, MAX_COUNT_FALLBACK);
 }
 
-/// a:Xp(b) -> b:Xi(v241,c) -> c:Xp(sb)
+/// a:Xp(b) -> b:Xi(v244,c) -> c:Xp(sb)
 ///            ^                     |
 ///            +---------------------+
 ///
-/// Two-query cycle, falls back due to value reaching >MAX_VALUE (we start at 241 and each
+/// Two-query cycle, falls back due to value reaching >MAX_VALUE (we start at 244 and each
 /// iteration increments until we reach >245).
 #[test]
 fn two_fallback_value() {
@@ -370,11 +379,11 @@ fn two_fallback_value() {
     let b = Input::MaxIterate(b_in);
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
-    b_in.set_inputs(&mut db).to(vec![Input::Value(241), c]);
+    b_in.set_inputs(&mut db).to(vec![Input::Value(244), c]);
     c_in.set_inputs(&mut db)
         .to(vec![Input::Successor(Box::new(b))]);
 
-    a.assert(&db, MAX_VALUE_FALLBACK + 1);
+    a.assert(&db, MAX_VALUE_FALLBACK);
 }
 
 /// a:Ni(b) -> b:Np(a, c) -> c:Np(v25, a)
@@ -438,7 +447,6 @@ fn layered_fallback_count() {
     b_in.set_inputs(&mut db).to(vec![a.clone(), c]);
     c_in.set_inputs(&mut db)
         .to(vec![Input::Value(25), Input::Successor(Box::new(b))]);
-
     a.assert(&db, MAX_COUNT_FALLBACK + 1);
 }
 
@@ -579,7 +587,6 @@ fn nested_fallback_value() {
         a.clone(),
         Input::Successor(Box::new(b)),
     ]);
-
     a.assert(&db, MAX_VALUE_FALLBACK + 1);
 }
 
@@ -615,7 +622,7 @@ fn nested_inner_first_fallback_value() {
 /// +-------------------+
 ///
 /// Nested cycles, double head. We converge on 25.
-#[test_log::test]
+#[test]
 fn nested_double_converge() {
     let mut db = DbImpl::new();
     let a_in = Inputs::new(&db, vec![]);

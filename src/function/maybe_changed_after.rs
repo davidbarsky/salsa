@@ -57,7 +57,9 @@ where
             // Check if we have a verified version: this is the hot path.
             let memo_guard = self.get_memo_from_table_for(zalsa, id);
             if let Some(memo) = &memo_guard {
-                if self.shallow_verify_memo(db, zalsa, database_key_index, memo) {
+                if !memo.is_provisional()
+                    && self.shallow_verify_memo(db, zalsa, database_key_index, memo)
+                {
                     return VerifyResult::changed_if(memo.revisions.changed_at > revision);
                 }
                 drop(memo_guard); // release the arc-swap guard before cold path
@@ -149,9 +151,6 @@ where
         database_key_index: DatabaseKeyIndex,
         memo: &Memo<C::Output<'_>>,
     ) -> bool {
-        if memo.revisions.cycle_ignore {
-            return false;
-        }
         let verified_at = memo.verified_at.load();
         let revision_now = zalsa.current_revision();
 
@@ -189,7 +188,7 @@ where
         old_memo: &Memo<C::Output<'_>>,
         active_query: &ActiveQueryGuard<'_>,
     ) -> VerifyResult {
-        if old_memo.revisions.cycle_ignore {
+        if old_memo.is_provisional() {
             return VerifyResult::Changed;
         }
         let zalsa = db.zalsa();

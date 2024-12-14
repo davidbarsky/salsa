@@ -341,12 +341,6 @@ pub(crate) struct QueryRevisions {
     /// after each iteration, whether the cycle has converged or must
     /// iterate again.
     pub(super) cycle_heads: FxHashSet<DatabaseKeyIndex>,
-
-    /// True if this result is based on provisional results of other
-    /// queries, and is not created explicitly by the query managing
-    /// a fixpoint iteration (the "cycle head"); this should never be
-    /// treated as a valid cached result.
-    pub(super) cycle_ignore: bool,
 }
 
 impl QueryRevisions {
@@ -359,7 +353,6 @@ impl QueryRevisions {
             tracked_struct_ids: Default::default(),
             accumulated: Default::default(),
             cycle_heads,
-            cycle_ignore: false,
         }
     }
 
