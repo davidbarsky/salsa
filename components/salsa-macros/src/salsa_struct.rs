@@ -49,6 +49,9 @@ pub(crate) trait SalsaStructAllowedOptions: AllowedOptions {
 
     /// Are `#[default]` fields allowed?
     const ALLOW_DEFAULT: bool;
+
+    /// Are `#[self_ref]` fields allowed?
+    const ALLOW_SELF_REF: bool;
 }
 
 pub(crate) struct SalsaField<'s> {
@@ -58,6 +61,7 @@ pub(crate) struct SalsaField<'s> {
     pub(crate) has_default_attr: bool,
     pub(crate) has_ref_attr: bool,
     pub(crate) has_no_eq_attr: bool,
+    pub(crate) has_self_ref_attr: bool,
     get_name: syn::Ident,
     set_name: syn::Ident,
 }
@@ -70,6 +74,7 @@ pub(crate) const FIELD_OPTION_ATTRIBUTES: &[(&str, fn(&syn::Attribute, &mut Sals
     ("default", |_, ef| ef.has_default_attr = true),
     ("return_ref", |_, ef| ef.has_ref_attr = true),
     ("no_eq", |_, ef| ef.has_no_eq_attr = true),
+    ("self_ref", |_, ef| ef.has_self_ref_attr = true),
     ("get", |attr, ef| {
         ef.get_name = attr.parse_args().unwrap();
     }),
@@ -104,6 +109,7 @@ where
 
         this.maybe_disallow_id_fields()?;
         this.maybe_disallow_default_fields()?;
+        this.maybe_disallow_self_ref_fields()?;
 
         this.check_generics()?;
 
@@ -161,6 +167,27 @@ where
                 return Err(syn::Error::new_spanned(
                     ef.field,
                     format!("`#[default]` cannot be used with `#[salsa::{}]`", A::KIND),
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Maybe disallow `#[self_ref]` attributes on the fields of this struct.
+    ///
+    /// If a `#[self_ref]` field is found, return an error.
+    fn maybe_disallow_self_ref_fields(&self) -> syn::Result<()> {
+        if A::ALLOW_SELF_REF {
+            return Ok(());
+        }
+
+        // Check if any field has the `#[self_ref]` attribute.
+        for ef in &self.fields {
+            if ef.has_self_ref_attr {
+                return Err(syn::Error::new_spanned(
+                    ef.field,
+                    format!("`#[self_ref]` cannot be used with `#[salsa::{}]`", A::KIND),
                 ));
             }
         }
@@ -303,6 +330,7 @@ impl<'s> SalsaField<'s> {
             has_ref_attr: false,
             has_default_attr: false,
             has_no_eq_attr: false,
+            has_self_ref_attr: false,
             get_name,
             set_name,
         };

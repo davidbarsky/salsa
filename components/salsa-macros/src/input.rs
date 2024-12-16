@@ -65,6 +65,8 @@ impl SalsaStructAllowedOptions for InputStruct {
     const HAS_LIFETIME: bool = false;
 
     const ALLOW_DEFAULT: bool = true;
+
+    const ALLOW_SELF_REF: bool = false;
 }
 
 struct Macro {
