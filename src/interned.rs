@@ -1,3 +1,5 @@
+use dashmap::SharedValue;
+
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::durability::Durability;
 use crate::id::AsId;
@@ -24,6 +26,8 @@ pub trait Configuration: Sized + 'static {
 
     /// The type of data being interned
     type Data<'db>: InternedData;
+    type EagerData<'db>: Lookup<Self::Data<'db>>;
+    type LazyData<'db>: LazyInit<Data = Self::Data<'db>, EagerData = Self::EagerData<'db>>;
 
     /// The end user struct
     type Struct<'db>: Copy;
@@ -38,6 +42,12 @@ pub trait Configuration: Sized + 'static {
 
     /// Deref the struct to yield the underlying id.
     fn deref_struct(s: Self::Struct<'_>) -> Id;
+}
+
+pub trait LazyInit {
+    type Data;
+    type EagerData;
+    fn assemble(self, id: Id, eager: Self::EagerData) -> Self::Data;
 }
 
 pub trait InternedData: Sized + Eq + Hash + Clone + Sync + Send {}
@@ -118,16 +128,18 @@ where
     pub fn intern_id<'db>(
         &'db self,
         db: &'db dyn crate::Database,
-        data: impl Lookup<C::Data<'db>>,
+        eager: C::EagerData<'db>,
+        lazy: C::LazyData<'db>,
     ) -> crate::Id {
-        C::deref_struct(self.intern(db, data)).as_id()
+        C::deref_struct(self.intern(db, eager, lazy)).as_id()
     }
 
     /// Intern data to a unique reference.
     pub fn intern<'db>(
         &'db self,
         db: &'db dyn crate::Database,
-        data: impl Lookup<C::Data<'db>>,
+        eager: C::EagerData<'db>,
+        lazy: C::LazyData<'db>,
     ) -> C::Struct<'db> {
         let zalsa_local = db.zalsa_local();
         zalsa_local.report_tracked_read(
@@ -142,46 +154,50 @@ where
         // We need to use the raw API for this lookup. See the [`Lookup`][] trait definition for an explanation of why.
         let data_hash = {
             let mut hasher = self.key_map.hasher().build_hasher();
-            data.hash(&mut hasher);
+            eager.hash(&mut hasher);
             hasher.finish()
         };
         let shard = self.key_map.determine_shard(data_hash as _);
+        let eq = |(a, _): &_| {
+            // SAFETY: it's safe to go from Data<'static> to Data<'db>
+            // shrink lifetime here to use a single lifetime in Lookup::eq(&StructKey<'db>, &C::Data<'db>)
+            let a: &C::Data<'db> = unsafe { std::mem::transmute(a) };
+            Lookup::eq(&eager, a)
+        };
+
         {
             let lock = self.key_map.shards()[shard].read();
-            if let Some(bucket) = lock.find(data_hash, |(a, _)| {
-                // SAFETY: it's safe to go from Data<'static> to Data<'db>
-                // shrink lifetime here to use a single lifetime in Lookup::eq(&StructKey<'db>, &C::Data<'db>)
-                let a: &C::Data<'db> = unsafe { std::mem::transmute(a) };
-                Lookup::eq(&data, a)
-            }) {
+            if let Some(bucket) = lock.find(data_hash, eq) {
                 // SAFETY: Read lock on map is held during this block
                 return C::struct_from_id(unsafe { *bucket.as_ref().1.get() });
             }
-        };
+        }
 
-        let data = data.into_owned();
-
-        let internal_data = unsafe { self.to_internal_data(data) };
-
-        match self.key_map.entry(internal_data.clone()) {
+        let mut lock = self.key_map.shards()[shard].write();
+        match lock.find_or_find_insert_slot(data_hash, eq, |(element, _)| {
+            let mut hasher = self.key_map.hasher().build_hasher();
+            Hash::hash(&element, &mut hasher);
+            hasher.finish()
+        }) {
             // Data has been interned by a racing call, use that ID instead
-            dashmap::mapref::entry::Entry::Occupied(entry) => {
-                let id = *entry.get();
-                drop(entry);
-                C::struct_from_id(id)
-            }
-
+            Ok(slot) => C::struct_from_id(unsafe { *slot.as_ref().1.get() }),
             // We won any races so should intern the data
-            dashmap::mapref::entry::Entry::Vacant(entry) => {
+            Err(slot) => {
                 let zalsa = db.zalsa();
                 let table = zalsa.table();
-                let next_id = zalsa_local.allocate(table, self.ingredient_index, || Value::<C> {
-                    data: internal_data,
+                let id = zalsa_local.allocate(table, self.ingredient_index, |id| Value::<C> {
+                    data: unsafe { self.to_internal_data(lazy.assemble(id, eager)) },
                     memos: Default::default(),
                     syncs: Default::default(),
                 });
-                entry.insert(next_id);
-                C::struct_from_id(next_id)
+                unsafe {
+                    lock.insert_in_slot(
+                        data_hash,
+                        slot,
+                        (table.get::<Value<C>>(id).data.clone(), SharedValue::new(id)),
+                    )
+                };
+                C::struct_from_id(id)
             }
         }
     }
