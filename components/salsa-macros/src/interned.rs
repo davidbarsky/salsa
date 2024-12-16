@@ -66,6 +66,8 @@ impl SalsaStructAllowedOptions for InternedStruct {
     const HAS_LIFETIME: bool = true;
 
     const ALLOW_DEFAULT: bool = false;
+
+    const ALLOW_SELF_REF: bool = true;
 }
 
 struct Macro {
