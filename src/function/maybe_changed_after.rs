@@ -57,9 +57,7 @@ where
             // Check if we have a verified version: this is the hot path.
             let memo_guard = self.get_memo_from_table_for(zalsa, id);
             if let Some(memo) = &memo_guard {
-                if !memo.is_provisional()
-                    && self.shallow_verify_memo(db, zalsa, database_key_index, memo)
-                {
+                if self.shallow_verify_memo(db, zalsa, database_key_index, memo, false) {
                     return VerifyResult::changed_if(memo.revisions.changed_at > revision);
                 }
                 drop(memo_guard); // release the arc-swap guard before cold path
@@ -150,14 +148,25 @@ where
         zalsa: &Zalsa,
         database_key_index: DatabaseKeyIndex,
         memo: &Memo<C::Output<'_>>,
+        allow_provisional: bool,
     ) -> bool {
-        let verified_at = memo.verified_at.load();
-        let revision_now = zalsa.current_revision();
-
         tracing::debug!(
             "{database_key_index:?}: shallow_verify_memo(memo = {memo:#?})",
             memo = memo.tracing_debug()
         );
+        if !allow_provisional {
+            if memo.may_be_provisional() {
+                tracing::debug!(
+                    "{database_key_index:?}: validate_provisional(memo = {memo:#?})",
+                    memo = memo.tracing_debug()
+                );
+                if !self.validate_provisional(db, zalsa, memo) {
+                    return false;
+                }
+            }
+        }
+        let verified_at = memo.verified_at.load();
+        let revision_now = zalsa.current_revision();
 
         if verified_at == revision_now {
             // Already verified.
@@ -175,6 +184,26 @@ where
         false
     }
 
+    /// Check if this memo's cycle heads have all been finalized. If so, mark it verified final and
+    /// return true, if not return false.
+    fn validate_provisional(
+        &self,
+        db: &C::DbView,
+        zalsa: &Zalsa,
+        memo: &Memo<C::Output<'_>>,
+    ) -> bool {
+        for cycle_head in &memo.revisions.cycle_heads {
+            if !zalsa
+                .lookup_ingredient(cycle_head.ingredient_index)
+                .is_verified_final(db.as_dyn_database(), cycle_head.key_index)
+            {
+                return false;
+            }
+        }
+        memo.verified_final.store(true);
+        true
+    }
+
     /// VerifyResult::Unchanged if the memo's value and `changed_at` time is up to date in the
     /// current revision. When this returns Unchanged with no cycle heads, it also updates the
     /// memo's `verified_at` field if needed to make future calls cheaper.
@@ -188,9 +217,6 @@ where
         old_memo: &Memo<C::Output<'_>>,
         active_query: &ActiveQueryGuard<'_>,
     ) -> VerifyResult {
-        if old_memo.is_provisional() {
-            return VerifyResult::Changed;
-        }
         let zalsa = db.zalsa();
         let database_key_index = active_query.database_key_index;
 
@@ -199,8 +225,11 @@ where
             old_memo = old_memo.tracing_debug()
         );
 
-        if self.shallow_verify_memo(db, zalsa, database_key_index, old_memo) {
+        if self.shallow_verify_memo(db, zalsa, database_key_index, old_memo, false) {
             return VerifyResult::Unchanged(Default::default());
+        }
+        if old_memo.may_be_provisional() {
+            return VerifyResult::Changed;
         }
 
         loop {

@@ -18,7 +18,7 @@ const MIN: CycleValue = CycleValue(0);
 const MID: CycleValue = CycleValue(11);
 const MAX: CycleValue = CycleValue(22);
 
-#[salsa::tracked(cycle_fn=query_a_cycle_fn, cycle_initial=query_a_initial)]
+#[salsa::tracked(cycle_fn=cycle_fn, cycle_initial=cycle_initial)]
 fn query_a(db: &dyn KnobsDatabase) -> CycleValue {
     eprintln!("query_a()");
     let b_value = query_b(db);
@@ -36,7 +36,7 @@ fn query_a(db: &dyn KnobsDatabase) -> CycleValue {
     b_value
 }
 
-fn query_a_cycle_fn(
+fn cycle_fn(
     _db: &dyn KnobsDatabase,
     value: &CycleValue,
     count: u32,
@@ -45,11 +45,11 @@ fn query_a_cycle_fn(
     CycleRecoveryAction::Iterate
 }
 
-fn query_a_initial(_db: &dyn KnobsDatabase) -> CycleValue {
+fn cycle_initial(_db: &dyn KnobsDatabase) -> CycleValue {
     MIN
 }
 
-#[salsa::tracked]
+#[salsa::tracked(cycle_fn=cycle_fn, cycle_initial=cycle_initial)]
 fn query_b(db: &dyn KnobsDatabase) -> CycleValue {
     eprintln!("query_b()");
 

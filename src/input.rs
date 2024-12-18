@@ -191,7 +191,7 @@ impl<C: Configuration> IngredientImpl<C> {
             stamp.durability,
             stamp.changed_at,
             InputAccumulatedValues::Empty,
-            &Default::default(),
+            None,
         );
         &value.fields
     }
@@ -220,6 +220,10 @@ impl<C: Configuration> Ingredient for IngredientImpl<C> {
         // Input ingredients are just a counter, they store no data, they are immortal.
         // Their *fields* are stored in function ingredients elsewhere.
         VerifyResult::unchanged()
+    }
+
+    fn is_verified_final<'db>(&'db self, _db: &'db dyn Database, _input: Id) -> bool {
+        false
     }
 
     fn cycle_recovery_strategy(&self) -> CycleRecoveryStrategy {

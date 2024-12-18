@@ -77,13 +77,15 @@ impl ActiveQuery {
         durability: Durability,
         revision: Revision,
         accumulated: InputAccumulatedValues,
-        cycle_heads: &FxHashSet<DatabaseKeyIndex>,
+        cycle_heads: Option<&FxHashSet<DatabaseKeyIndex>>,
     ) {
         self.input_outputs.insert((EdgeKind::Input, input));
         self.durability = self.durability.min(durability);
         self.changed_at = self.changed_at.max(revision);
         self.accumulated.add_input(accumulated);
-        self.cycle_heads.extend(cycle_heads);
+        if let Some(cycle_heads) = cycle_heads {
+            self.cycle_heads.extend(cycle_heads);
+        }
     }
 
     pub(super) fn add_untracked_read(&mut self, changed_at: Revision) {

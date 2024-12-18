@@ -1,3 +1,8 @@
+/// The maximum number of times we'll fixpoint-iterate before panicking.
+///
+/// Should only be relevant in case of a badly configured cycle recovery.
+pub const MAX_ITERATIONS: u32 = 200;
+
 /// Return value from a cycle recovery function.
 #[derive(Debug)]
 pub enum CycleRecoveryAction<T> {

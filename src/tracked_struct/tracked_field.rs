@@ -61,6 +61,10 @@ where
         VerifyResult::changed_if(field_changed_at > revision)
     }
 
+    fn is_verified_final<'db>(&'db self, _db: &'db dyn Database, _input: Id) -> bool {
+        false
+    }
+
     fn origin(
         &self,
         _db: &dyn Database,

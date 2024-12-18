@@ -564,7 +564,7 @@ where
             data.durability,
             field_changed_at,
             InputAccumulatedValues::Empty,
-            &Default::default(),
+            None,
         );
 
         unsafe { self.to_self_ref(&data.fields) }
@@ -586,6 +586,10 @@ where
         _revision: Revision,
     ) -> VerifyResult {
         VerifyResult::unchanged()
+    }
+
+    fn is_verified_final<'db>(&'db self, _db: &'db dyn Database, _input: Id) -> bool {
+        false
     }
 
     fn cycle_recovery_strategy(&self) -> CycleRecoveryStrategy {

@@ -8,7 +8,24 @@ use expect_test::expect;
 use salsa::{CycleRecoveryAction, Database as Db, DatabaseImpl as DbImpl, Durability, Setter};
 use test_log::test;
 
-/// A vector of inputs a query can evaluate to get an iterator of u8 values to operate on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Value {
+    N(u8),
+    OutOfBounds,
+    TooManyIterations,
+}
+
+impl Value {
+    fn into_value(&self) -> Option<u8> {
+        if let Self::N(val) = self {
+            Some(*val)
+        } else {
+            None
+        }
+    }
+}
+
+/// A vector of inputs a query can evaluate to get an iterator of values to operate on.
 ///
 /// This allows creating arbitrary query graphs between the four queries below (`min_iterate`,
 /// `max_iterate`, `min_panic`, `max_panic`) for testing cycle behaviors.
@@ -18,19 +35,19 @@ struct Inputs {
 }
 
 impl Inputs {
-    fn values(self, db: &dyn Db) -> impl Iterator<Item = u8> + '_ {
+    fn values(self, db: &dyn Db) -> impl Iterator<Item = Value> + '_ {
         self.inputs(db).into_iter().map(|input| input.eval(db))
     }
 }
 
-/// A single input, evaluating to a single u8 value.
+/// A single input, evaluating to a single [`Value`].
 #[derive(Clone, Debug)]
 enum Input {
     /// a simple value
-    Value(u8),
+    Value(Value),
 
     /// a simple value, reported as an untracked read
-    UntrackedRead(u8),
+    UntrackedRead(Value),
 
     /// minimum of the given inputs, with fixpoint iteration on cycles
     MinIterate(Inputs),
@@ -49,7 +66,7 @@ enum Input {
 }
 
 impl Input {
-    fn eval(self, db: &dyn Db) -> u8 {
+    fn eval(self, db: &dyn Db) -> Value {
         match self {
             Self::Value(value) => value,
             Self::UntrackedRead(value) => {
@@ -60,77 +77,117 @@ impl Input {
             Self::MaxIterate(inputs) => max_iterate(db, inputs),
             Self::MinPanic(inputs) => min_panic(db, inputs),
             Self::MaxPanic(inputs) => max_panic(db, inputs),
-            Self::Successor(input) => {
-                let inval = input.eval(db);
-                if inval >= MIN_VALUE && inval <= MAX_VALUE {
-                    inval + 1
-                } else {
-                    inval
-                }
-            }
+            Self::Successor(input) => match input.eval(db) {
+                Value::N(num) => Value::N(num + 1),
+                other => other,
+            },
         }
     }
 
-    fn assert(self, db: &dyn Db, expected: u8) {
-        dbg!("ASSERT");
+    fn assert(self, db: &dyn Db, expected: Value) {
         assert_eq!(self.eval(db), expected)
     }
+
+    fn assert_value(self, db: &dyn Db, expected: u8) {
+        self.assert(db, Value::N(expected))
+    }
+
+    fn assert_bounds(self, db: &dyn Db) {
+        self.assert(db, Value::OutOfBounds)
+    }
+
+    fn assert_count(self, db: &dyn Db) {
+        self.assert(db, Value::TooManyIterations)
+    }
 }
 
-#[salsa::tracked(cycle_fn=min_recover, cycle_initial=min_initial)]
-fn min_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> u8 {
-    inputs.values(db).min().expect("empty inputs!")
-}
-
-const MIN_COUNT_FALLBACK: u8 = 4;
-const MIN_VALUE_FALLBACK: u8 = 7;
 const MIN_VALUE: u8 = 10;
-
-fn min_recover(_db: &dyn Db, value: &u8, count: u32, _inputs: Inputs) -> CycleRecoveryAction<u8> {
-    if *value < MIN_VALUE {
-        CycleRecoveryAction::Fallback(MIN_VALUE_FALLBACK)
-    } else if count > 3 {
-        CycleRecoveryAction::Fallback(MIN_COUNT_FALLBACK)
-    } else {
-        CycleRecoveryAction::Iterate
-    }
-}
-
-fn min_initial(_db: &dyn Db, _inputs: Inputs) -> u8 {
-    255
-}
-
-#[salsa::tracked(cycle_fn=max_recover, cycle_initial=max_initial)]
-fn max_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> u8 {
-    inputs.values(db).max().expect("empty inputs!")
-}
-
-const MAX_COUNT_FALLBACK: u8 = 251;
-const MAX_VALUE_FALLBACK: u8 = 248;
 const MAX_VALUE: u8 = 245;
+const MAX_ITERATIONS: u32 = 3;
 
-fn max_recover(_db: &dyn Db, value: &u8, count: u32, _inputs: Inputs) -> CycleRecoveryAction<u8> {
-    if *value > MAX_VALUE {
-        CycleRecoveryAction::Fallback(MAX_VALUE_FALLBACK)
-    } else if count > 3 {
-        CycleRecoveryAction::Fallback(MAX_COUNT_FALLBACK)
+/// Recover from a cycle by falling back to `Value::OutOfBounds` if the value is out of bounds,
+/// `Value::TooManyIterations` if we've iterated more than `MAX_ITERATIONS` times, or else
+/// iterating again.
+fn cycle_recover(
+    _db: &dyn Db,
+    value: &Value,
+    count: u32,
+    _inputs: Inputs,
+) -> CycleRecoveryAction<Value> {
+    if value
+        .into_value()
+        .is_some_and(|val| val <= MIN_VALUE || val >= MAX_VALUE)
+    {
+        CycleRecoveryAction::Fallback(Value::OutOfBounds)
+    } else if count > MAX_ITERATIONS {
+        CycleRecoveryAction::Fallback(Value::TooManyIterations)
     } else {
         CycleRecoveryAction::Iterate
     }
 }
 
-fn max_initial(_db: &dyn Db, _inputs: Inputs) -> u8 {
-    0
+/// Fold an iterator of `Value` into a `Value`, given some binary operator to apply to two `u8`.
+/// `Value::TooManyIterations` and `Value::OutOfBounds` will always propagate, with
+/// `Value::TooManyIterations` taking precedence.
+fn fold_values<F>(values: impl IntoIterator<Item = Value>, op: F) -> Value
+where
+    F: Fn(u8, u8) -> u8,
+{
+    values
+        .into_iter()
+        .fold(None, |accum, elem| {
+            let Some(accum) = accum else {
+                return Some(elem);
+            };
+            match (accum, elem) {
+                (Value::TooManyIterations, _) | (_, Value::TooManyIterations) => {
+                    Some(Value::TooManyIterations)
+                }
+                (Value::OutOfBounds, _) | (_, Value::OutOfBounds) => Some(Value::OutOfBounds),
+                (Value::N(val1), Value::N(val2)) => Some(Value::N(op(val1, val2))),
+            }
+        })
+        .expect("inputs should not be empty")
 }
 
-#[salsa::tracked]
-fn min_panic<'db>(db: &'db dyn Db, inputs: Inputs) -> u8 {
-    inputs.values(db).min().expect("empty inputs!")
+/// Query minimum value of inputs, with cycle recovery.
+#[salsa::tracked(cycle_fn=cycle_recover, cycle_initial=min_initial)]
+fn min_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
+    dbg!(fold_values(inputs.values(db), u8::min))
 }
 
+fn min_initial(_db: &dyn Db, _inputs: Inputs) -> Value {
+    Value::N(255)
+}
+
+/// Query maximum value of inputs, with cycle recovery.
+#[salsa::tracked(cycle_fn=cycle_recover, cycle_initial=max_initial)]
+fn max_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
+    dbg!(fold_values(inputs.values(db), u8::max))
+}
+
+fn max_initial(_db: &dyn Db, _inputs: Inputs) -> Value {
+    Value::N(0)
+}
+
+/// Query minimum value of inputs, without cycle recovery.
 #[salsa::tracked]
-fn max_panic<'db>(db: &'db dyn Db, inputs: Inputs) -> u8 {
-    inputs.values(db).max().expect("empty inputs!")
+fn min_panic<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
+    dbg!(fold_values(inputs.values(db), u8::min))
+}
+
+/// Query maximum value of inputs, without cycle recovery.
+#[salsa::tracked]
+fn max_panic<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
+    dbg!(fold_values(inputs.values(db), u8::max))
+}
+
+fn untracked(num: u8) -> Input {
+    Input::UntrackedRead(Value::N(num))
+}
+
+fn value(num: u8) -> Input {
+    Input::Value(Value::N(num))
 }
 
 // Diagram nomenclature for nodes: Each node is represented as a:xx(ii), where `a` is a sequential
@@ -176,8 +233,7 @@ fn self_untracked_panic() {
     let mut db = DbImpl::new();
     let a_in = Inputs::new(&db, vec![]);
     let a = Input::MinPanic(a_in);
-    a_in.set_inputs(&mut db)
-        .to(vec![Input::UntrackedRead(10), a.clone()]);
+    a_in.set_inputs(&mut db).to(vec![untracked(10), a.clone()]);
 
     a.eval(&db);
 }
@@ -194,7 +250,7 @@ fn self_converge_initial_value() {
     let a = Input::MinIterate(a_in);
     a_in.set_inputs(&mut db).to(vec![a.clone()]);
 
-    a.assert(&db, 255);
+    a.assert_value(&db, 255);
 }
 
 /// a:Ni(b) --> b:Np(a)
@@ -213,7 +269,7 @@ fn two_mixed_converge_initial_value() {
     a_in.set_inputs(&mut db).to(vec![b]);
     b_in.set_inputs(&mut db).to(vec![a.clone()]);
 
-    a.assert(&db, 255);
+    a.assert_value(&db, 255);
 }
 
 /// a:Np(b) --> b:Ni(a)
@@ -252,8 +308,8 @@ fn two_iterate_converge_initial_value() {
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![a.clone()]);
 
-    a.assert(&db, 255);
-    b.assert(&db, 255);
+    a.assert_value(&db, 255);
+    b.assert_value(&db, 255);
 }
 
 /// a:Xi(b) --> b:Ni(a)
@@ -273,8 +329,8 @@ fn two_iterate_converge_initial_value_2() {
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![a.clone()]);
 
-    a.assert(&db, 0);
-    b.assert(&db, 0);
+    a.assert_value(&db, 0);
+    b.assert_value(&db, 0);
 }
 
 /// a:Np(b) --> b:Ni(c) --> c:Xp(b)
@@ -295,7 +351,7 @@ fn two_indirect_iterate_converge_initial_value() {
     b_in.set_inputs(&mut db).to(vec![c]);
     c_in.set_inputs(&mut db).to(vec![b]);
 
-    a.assert(&db, 255);
+    a.assert_value(&db, 255);
 }
 
 /// a:Xp(b) --> b:Np(c) --> c:Xi(b)
@@ -320,7 +376,7 @@ fn two_indirect_panic() {
     a.eval(&db);
 }
 
-/// a:Np(b) -> b:Ni(v250,c) -> c:Xp(b)
+/// a:Np(b) -> b:Ni(v200,c) -> c:Xp(b)
 ///            ^                     |
 ///            +---------------------+
 ///
@@ -335,10 +391,10 @@ fn two_converge() {
     let b = Input::MinIterate(b_in);
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
-    b_in.set_inputs(&mut db).to(vec![Input::Value(250), c]);
+    b_in.set_inputs(&mut db).to(vec![value(200), c]);
     c_in.set_inputs(&mut db).to(vec![b]);
 
-    a.assert(&db, 250);
+    a.assert_value(&db, 200);
 }
 
 /// a:Xp(b) -> b:Xi(v20,c) -> c:Xp(sb)
@@ -356,11 +412,11 @@ fn two_fallback_count() {
     let b = Input::MaxIterate(b_in);
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
-    b_in.set_inputs(&mut db).to(vec![Input::Value(20), c]);
+    b_in.set_inputs(&mut db).to(vec![value(20), c]);
     c_in.set_inputs(&mut db)
         .to(vec![Input::Successor(Box::new(b))]);
 
-    a.assert(&db, MAX_COUNT_FALLBACK);
+    a.assert_count(&db);
 }
 
 /// a:Xp(b) -> b:Xi(v244,c) -> c:Xp(sb)
@@ -379,11 +435,11 @@ fn two_fallback_value() {
     let b = Input::MaxIterate(b_in);
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
-    b_in.set_inputs(&mut db).to(vec![Input::Value(244), c]);
+    b_in.set_inputs(&mut db).to(vec![value(244), c]);
     c_in.set_inputs(&mut db)
         .to(vec![Input::Successor(Box::new(b))]);
 
-    a.assert(&db, MAX_VALUE_FALLBACK);
+    a.assert_bounds(&db);
 }
 
 /// a:Ni(b) -> b:Np(a, c) -> c:Np(v25, a)
@@ -402,10 +458,9 @@ fn three_fork_converge() {
     let c = Input::MinPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b]);
     b_in.set_inputs(&mut db).to(vec![a.clone(), c]);
-    c_in.set_inputs(&mut db)
-        .to(vec![Input::Value(25), a.clone()]);
+    c_in.set_inputs(&mut db).to(vec![value(25), a.clone()]);
 
-    a.assert(&db, 25);
+    a.assert_value(&db, 25);
 }
 
 /// a:Ni(b) -> b:Ni(a, c) -> c:Np(v25, b)
@@ -424,9 +479,9 @@ fn layered_converge() {
     let c = Input::MinPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![a.clone(), c]);
-    c_in.set_inputs(&mut db).to(vec![Input::Value(25), b]);
+    c_in.set_inputs(&mut db).to(vec![value(25), b]);
 
-    a.assert(&db, 25);
+    a.assert_value(&db, 25);
 }
 
 /// a:Xi(b) -> b:Xi(a, c) -> c:Xp(v25, sb)
@@ -446,11 +501,11 @@ fn layered_fallback_count() {
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![a.clone(), c]);
     c_in.set_inputs(&mut db)
-        .to(vec![Input::Value(25), Input::Successor(Box::new(b))]);
-    a.assert(&db, MAX_COUNT_FALLBACK + 1);
+        .to(vec![value(25), Input::Successor(Box::new(b))]);
+    a.assert_count(&db);
 }
 
-/// a:Xi(b) -> b:Xi(a, c) -> c:Xp(v240, sb)
+/// a:Xi(b) -> b:Xi(a, c) -> c:Xp(v243, sb)
 /// ^          |        ^          |
 /// +----------+        +----------+
 ///
@@ -467,9 +522,9 @@ fn layered_fallback_value() {
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![a.clone(), c]);
     c_in.set_inputs(&mut db)
-        .to(vec![Input::Value(240), Input::Successor(Box::new(b))]);
+        .to(vec![value(243), Input::Successor(Box::new(b))]);
 
-    a.assert(&db, MAX_VALUE_FALLBACK + 1);
+    a.assert_bounds(&db);
 }
 
 /// a:Ni(b) -> b:Ni(c) -> c:Np(v25, a, b)
@@ -488,10 +543,9 @@ fn nested_converge() {
     let c = Input::MinPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![c]);
-    c_in.set_inputs(&mut db)
-        .to(vec![Input::Value(25), a.clone(), b]);
+    c_in.set_inputs(&mut db).to(vec![value(25), a.clone(), b]);
 
-    a.assert(&db, 25);
+    a.assert_value(&db, 25);
 }
 
 /// a:Ni(b) -> b:Ni(c) -> c:Np(v25, b, a)
@@ -510,10 +564,9 @@ fn nested_inner_first_converge() {
     let c = Input::MinPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![c]);
-    c_in.set_inputs(&mut db)
-        .to(vec![Input::Value(25), b, a.clone()]);
+    c_in.set_inputs(&mut db).to(vec![value(25), b, a.clone()]);
 
-    a.assert(&db, 25);
+    a.assert_value(&db, 25);
 }
 
 /// a:Xi(b) -> b:Xi(c) -> c:Xp(v25, a, sb)
@@ -532,13 +585,10 @@ fn nested_fallback_count() {
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![c]);
-    c_in.set_inputs(&mut db).to(vec![
-        Input::Value(25),
-        a.clone(),
-        Input::Successor(Box::new(b)),
-    ]);
+    c_in.set_inputs(&mut db)
+        .to(vec![value(25), a.clone(), Input::Successor(Box::new(b))]);
 
-    a.assert(&db, MAX_COUNT_FALLBACK + 1);
+    a.assert_count(&db);
 }
 
 /// a:Xi(b) -> b:Xi(c) -> c:Xp(v25, b, sa)
@@ -557,16 +607,13 @@ fn nested_inner_first_fallback_count() {
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![c]);
-    c_in.set_inputs(&mut db).to(vec![
-        Input::Value(25),
-        b,
-        Input::Successor(Box::new(a.clone())),
-    ]);
+    c_in.set_inputs(&mut db)
+        .to(vec![value(25), b, Input::Successor(Box::new(a.clone()))]);
 
-    a.assert(&db, MAX_COUNT_FALLBACK + 1);
+    a.assert_count(&db);
 }
 
-/// a:Xi(b) -> b:Xi(c) -> c:Xp(v240, a, sb)
+/// a:Xi(b) -> b:Xi(c) -> c:Xp(v243, a, sb)
 /// ^          ^                          |
 /// +----------+--------------------------+
 ///
@@ -581,16 +628,18 @@ fn nested_fallback_value() {
     let b = Input::MaxIterate(b_in);
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
-    b_in.set_inputs(&mut db).to(vec![c]);
+    b_in.set_inputs(&mut db).to(vec![c.clone()]);
     c_in.set_inputs(&mut db).to(vec![
-        Input::Value(240),
+        value(243),
         a.clone(),
-        Input::Successor(Box::new(b)),
+        Input::Successor(Box::new(b.clone())),
     ]);
-    a.assert(&db, MAX_VALUE_FALLBACK + 1);
+    a.assert_bounds(&db);
+    b.assert_bounds(&db);
+    c.assert_bounds(&db);
 }
 
-/// a:Xi(b) -> b:Xi(c) -> c:Xp(v240, b, sa)
+/// a:Xi(b) -> b:Xi(c) -> c:Xp(v243, b, sa)
 /// ^          ^                          |
 /// +----------+--------------------------+
 ///
@@ -606,13 +655,10 @@ fn nested_inner_first_fallback_value() {
     let c = Input::MaxPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![c]);
-    c_in.set_inputs(&mut db).to(vec![
-        Input::Value(240),
-        b,
-        Input::Successor(Box::new(a.clone())),
-    ]);
+    c_in.set_inputs(&mut db)
+        .to(vec![value(243), b, Input::Successor(Box::new(a.clone()))]);
 
-    a.assert(&db, MAX_VALUE_FALLBACK + 1);
+    a.assert_bounds(&db);
 }
 
 /// a:Ni(b) -> b:Ni(c, a) -> c:Np(v25, a, b)
@@ -633,10 +679,9 @@ fn nested_double_converge() {
     let c = Input::MinPanic(c_in);
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![c, a.clone()]);
-    c_in.set_inputs(&mut db)
-        .to(vec![Input::Value(25), a.clone(), b]);
+    c_in.set_inputs(&mut db).to(vec![value(25), a.clone(), b]);
 
-    a.assert(&db, 25);
+    a.assert_value(&db, 25);
 }
 
 // Multiple-revision cycles
@@ -658,11 +703,11 @@ fn cycle_becomes_non_cycle() {
     a_in.set_inputs(&mut db).to(vec![b]);
     b_in.set_inputs(&mut db).to(vec![a.clone()]);
 
-    a.clone().assert(&db, 255);
+    a.clone().assert_value(&db, 255);
 
-    b_in.set_inputs(&mut db).to(vec![Input::Value(30)]);
+    b_in.set_inputs(&mut db).to(vec![value(30)]);
 
-    a.assert(&db, 30);
+    a.assert_value(&db, 30);
 }
 
 /// a:Ni(b) --> b:Np(v30)
@@ -680,13 +725,13 @@ fn non_cycle_becomes_cycle() {
     let a = Input::MinIterate(a_in);
     let b = Input::MinPanic(b_in);
     a_in.set_inputs(&mut db).to(vec![b]);
-    b_in.set_inputs(&mut db).to(vec![Input::Value(30)]);
+    b_in.set_inputs(&mut db).to(vec![value(30)]);
 
-    a.clone().assert(&db, 30);
+    a.clone().assert_value(&db, 30);
 
     b_in.set_inputs(&mut db).to(vec![a.clone()]);
 
-    a.assert(&db, 255);
+    a.assert_value(&db, 255);
 }
 
 /// a:Xi(b) -> b:Xi(c, a) -> c:Xp(v25, a, sb)
@@ -709,27 +754,26 @@ fn nested_double_multiple_revisions() {
     a_in.set_inputs(&mut db).to(vec![b.clone()]);
     b_in.set_inputs(&mut db).to(vec![c, a.clone()]);
     c_in.set_inputs(&mut db).to(vec![
-        Input::Value(25),
+        value(25),
         a.clone(),
         Input::Successor(Box::new(b.clone())),
     ]);
 
-    a.clone().assert(&db, MAX_COUNT_FALLBACK + 1);
+    a.clone().assert_count(&db);
 
     // next revision, we hit max value instead
     c_in.set_inputs(&mut db).to(vec![
-        Input::Value(240),
+        value(243),
         a.clone(),
         Input::Successor(Box::new(b.clone())),
     ]);
 
-    a.clone().assert(&db, MAX_VALUE_FALLBACK + 1);
+    a.clone().assert_bounds(&db);
 
     // and next revision, we converge
-    c_in.set_inputs(&mut db)
-        .to(vec![Input::Value(240), a.clone(), b]);
+    c_in.set_inputs(&mut db).to(vec![value(240), a.clone(), b]);
 
-    a.assert(&db, 240);
+    a.assert_value(&db, 240);
 }
 
 /// a:Ni(b) -> b:Ni(c) -> c:Ni(a)
@@ -757,14 +801,14 @@ fn cycle_durability() {
         .with_durability(Durability::HIGH)
         .to(vec![a.clone()]);
 
-    a.clone().assert(&db, 255);
+    a.clone().assert_value(&db, 255);
 
     // next revision, we converge instead
     a_in.set_inputs(&mut db)
         .with_durability(Durability::LOW)
-        .to(vec![Input::Value(45), b]);
+        .to(vec![value(45), b]);
 
-    a.assert(&db, 45);
+    a.assert_value(&db, 45);
 }
 
 /// a:Np(v59, b) -> b:Ni(v60, c) -> c:Np(b)
@@ -781,22 +825,19 @@ fn cycle_unchanged() {
     let a = Input::MinPanic(a_in);
     let b = Input::MinIterate(b_in);
     let c = Input::MinPanic(c_in);
-    a_in.set_inputs(&mut db)
-        .to(vec![Input::Value(59), b.clone()]);
-    b_in.set_inputs(&mut db).to(vec![Input::Value(60), c]);
+    a_in.set_inputs(&mut db).to(vec![value(59), b.clone()]);
+    b_in.set_inputs(&mut db).to(vec![value(60), c]);
     c_in.set_inputs(&mut db).to(vec![b.clone()]);
 
-    a.clone().assert(&db, 59);
-    b.clone().assert(&db, 60);
+    a.clone().assert_value(&db, 59);
+    b.clone().assert_value(&db, 60);
 
-    db.assert_logs_len(5);
+    db.assert_logs_len(4);
 
     // next revision, we change only A, which is not part of the cycle and the cycle does not
     // depend on.
-    a_in.set_inputs(&mut db)
-        .to(vec![Input::Value(45), b.clone()]);
-
-    b.assert(&db, 60);
+    a_in.set_inputs(&mut db).to(vec![value(45), b.clone()]);
+    b.assert_value(&db, 60);
 
     db.assert_logs(expect![[r#"
         [
@@ -805,5 +846,5 @@ fn cycle_unchanged() {
             "salsa_event(DidValidateMemoizedValue { database_key: min_iterate(Id(1)) })",
         ]"#]]);
 
-    a.assert(&db, 45);
+    a.assert_value(&db, 45);
 }

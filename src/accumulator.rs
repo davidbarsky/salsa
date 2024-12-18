@@ -107,6 +107,10 @@ impl<A: Accumulator> Ingredient for IngredientImpl<A> {
         panic!("nothing should ever depend on an accumulator directly")
     }
 
+    fn is_verified_final<'db>(&'db self, _db: &'db dyn Database, _input: Id) -> bool {
+        false
+    }
+
     fn cycle_recovery_strategy(&self) -> CycleRecoveryStrategy {
         CycleRecoveryStrategy::Panic
     }

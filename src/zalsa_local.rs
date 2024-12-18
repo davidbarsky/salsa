@@ -166,7 +166,7 @@ impl ZalsaLocal {
         durability: Durability,
         changed_at: Revision,
         accumulated: InputAccumulatedValues,
-        cycle_heads: &FxHashSet<DatabaseKeyIndex>,
+        cycle_heads: Option<&FxHashSet<DatabaseKeyIndex>>,
     ) {
         debug!(
             "report_tracked_read(input={:?}, durability={:?}, changed_at={:?})",

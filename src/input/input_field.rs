@@ -62,6 +62,10 @@ where
         VerifyResult::changed_if(value.stamps[self.field_index].changed_at > revision)
     }
 
+    fn is_verified_final<'db>(&'db self, _db: &'db dyn Database, _input: Id) -> bool {
+        false
+    }
+
     fn origin(&self, _db: &dyn Database, _key_index: Id) -> Option<QueryOrigin> {
         None
     }

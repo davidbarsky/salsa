@@ -136,7 +136,7 @@ where
             Durability::MAX,
             self.reset_at,
             InputAccumulatedValues::Empty,
-            &Default::default(),
+            None,
         );
 
         // Optimisation to only get read lock on the map if the data has already
@@ -224,6 +224,10 @@ where
         revision: Revision,
     ) -> VerifyResult {
         VerifyResult::changed_if(revision < self.reset_at)
+    }
+
+    fn is_verified_final<'db>(&'db self, _db: &'db dyn Database, _input: Id) -> bool {
+        false
     }
 
     fn cycle_recovery_strategy(&self) -> crate::cycle::CycleRecoveryStrategy {

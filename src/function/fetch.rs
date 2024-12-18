@@ -29,7 +29,7 @@ where
             durability,
             changed_at,
             InputAccumulatedValues::from_map(&memo.revisions.accumulated),
-            &memo.revisions.cycle_heads,
+            memo.cycle_heads(),
         );
 
         value
@@ -54,8 +54,7 @@ where
         let memo_guard = self.get_memo_from_table_for(zalsa, id);
         if let Some(memo) = &memo_guard {
             if memo.value.is_some()
-                && !memo.is_provisional()
-                && self.shallow_verify_memo(db, zalsa, self.database_key_index(id), memo)
+                && self.shallow_verify_memo(db, zalsa, self.database_key_index(id), memo, false)
             {
                 // Unsafety invariant: memo is present in memo_map
                 unsafe {
@@ -84,9 +83,10 @@ where
                 let memo_guard = self.get_memo_from_table_for(zalsa, id);
                 if let Some(memo) = &memo_guard {
                     dbg!("found provisional value, shallow verifying it");
+                    dbg!(memo.tracing_debug());
                     if memo.value.is_some()
                         && memo.revisions.cycle_heads.contains(&database_key_index)
-                        && self.shallow_verify_memo(db, zalsa, database_key_index, memo)
+                        && self.shallow_verify_memo(db, zalsa, database_key_index, memo, true)
                     {
                         dbg!("verified provisional value, returning it");
                         dbg!(&memo.value);
@@ -146,6 +146,8 @@ where
             }
         }
 
-        Some(self.execute(db, database_key_index, opt_old_memo))
+        let memo = self.execute(db, database_key_index, opt_old_memo);
+
+        Some(memo)
     }
 }

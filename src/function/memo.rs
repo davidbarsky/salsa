@@ -1,3 +1,4 @@
+use rustc_hash::FxHashSet;
 use std::any::Any;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -109,6 +110,9 @@ pub(super) struct Memo<V> {
     /// as the current revision.
     pub(super) verified_at: AtomicCell<Revision>,
 
+    /// Is this memo verified to not be a provisional cycle result?
+    pub(super) verified_final: AtomicCell<bool>,
+
     /// Revision information
     pub(super) revisions: QueryRevisions,
 }
@@ -118,13 +122,23 @@ impl<V> Memo<V> {
         Memo {
             value,
             verified_at: AtomicCell::new(revision_now),
+            verified_final: AtomicCell::new(revisions.cycle_heads.is_empty()),
             revisions,
         }
     }
 
-    /// True if this is a provisional cycle-iteration result.
-    pub(super) fn is_provisional(&self) -> bool {
-        !self.revisions.cycle_heads.is_empty()
+    /// True if this is may be a provisional cycle-iteration result.
+    pub(super) fn may_be_provisional(&self) -> bool {
+        !self.verified_final.load()
+    }
+
+    /// Cycle heads that should be propagated to dependent queries.
+    pub(super) fn cycle_heads(&self) -> Option<&FxHashSet<DatabaseKeyIndex>> {
+        if self.may_be_provisional() {
+            Some(&self.revisions.cycle_heads)
+        } else {
+            None
+        }
     }
 
     /// True if this memo is known not to have changed based on its durability.
@@ -185,6 +199,7 @@ impl<V> Memo<V> {
                         },
                     )
                     .field("verified_at", &self.memo.verified_at)
+                    .field("verified_final", &self.memo.verified_final)
                     .field("revisions", &self.memo.revisions)
                     .finish()
             }

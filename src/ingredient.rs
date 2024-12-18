@@ -41,6 +41,9 @@ pub trait Ingredient: Any + std::fmt::Debug + Send + Sync {
         revision: Revision,
     ) -> VerifyResult;
 
+    /// Is the value for `input` in this ingredient marked as possibly a provisional cycle value?
+    fn is_verified_final<'db>(&'db self, db: &'db dyn Database, input: Id) -> bool;
+
     /// What were the inputs (if any) that were used to create the value at `key_index`.
     fn origin(&self, db: &dyn Database, key_index: Id) -> Option<QueryOrigin>;
 

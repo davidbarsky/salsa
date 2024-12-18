@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::{zalsa::ZalsaDatabase, Database, DatabaseKeyIndex, Event, EventKind};
+use crate::{
+    cycle::MAX_ITERATIONS, zalsa::ZalsaDatabase, Database, DatabaseKeyIndex, Event, EventKind,
+};
 
 use super::{memo::Memo, Configuration, IngredientImpl};
 
@@ -103,51 +105,36 @@ where
                     ) {
                         crate::CycleRecoveryAction::Iterate => {
                             tracing::debug!("{database_key_index:?}: execute: iterate again");
-                            iteration_count = iteration_count.checked_add(1).expect(
-                                "fixpoint iteration of {database_key_index:#?} should \
-                                converge before u32::MAX iterations",
-                            );
-                            opt_last_provisional = Some(self.insert_memo(
-                                zalsa,
-                                id,
-                                Memo::new(Some(new_value), revision_now, revisions),
-                            ));
-                            continue;
                         }
                         crate::CycleRecoveryAction::Fallback(fallback_value) => {
                             tracing::debug!(
                                 "{database_key_index:?}: execute: user cycle_fn says to fall back"
                             );
                             new_value = fallback_value;
+                            // We have to insert the fallback value for this query and then iterate
+                            // one more time to fill in correct values for everything else in the
+                            // cycle based on it; then we'll re-insert it as final value.
                         }
                     }
-                }
-                iteration_count = iteration_count.checked_add(1).expect(
-                    "fixpoint iteration of {database_key_index:#?} should \
+                    iteration_count = iteration_count.checked_add(1).expect(
+                        "fixpoint iteration of {database_key_index:#?} should \
                                 converge before u32::MAX iterations",
-                );
-                if iteration_count > 10 {
-                    panic!("too much iteration");
+                    );
+                    if iteration_count > MAX_ITERATIONS {
+                        panic!("{database_key_index:?}: execute: too many cycle iterations");
+                    }
+                    opt_last_provisional = Some(self.insert_memo(
+                        zalsa,
+                        id,
+                        Memo::new(Some(new_value), revision_now, revisions),
+                    ));
+                    continue;
                 }
-                // This is no longer a provisional result, it's our final result, so remove ourself
-                // from the cycle heads, and iterate one last time to remove ourself from all other
-                // results in the cycle as well and turn them into usable cached results.
-                // TODO Can we avoid doing this? the extra iteration is quite expensive if there is
-                // a nested cycle. Maybe track the relevant memos and replace them all with the
-                // cycle head removed? Or just let them keep the cycle head and allow cycle memos
-                // to be used when we are not actually iterating the cycle for that head?
                 tracing::debug!(
-                    "{database_key_index:?}: execute: fixpoint iteration has a final value, \
-                    one more iteration to remove cycle heads from memos"
+                    "{database_key_index:?}: execute: fixpoint iteration has a final value"
                 );
                 revisions.cycle_heads.remove(&database_key_index);
                 dbg!(&revisions.cycle_heads);
-                self.insert_memo(
-                    zalsa,
-                    id,
-                    Memo::new(Some(new_value), revision_now, revisions),
-                );
-                continue;
             }
 
             tracing::debug!("{database_key_index:?}: execute: result.revisions = {revisions:#?}");

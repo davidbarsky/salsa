@@ -202,6 +202,11 @@ where
         self.maybe_changed_after(db, key, revision)
     }
 
+    fn is_verified_final<'db>(&'db self, db: &'db dyn Database, input: Id) -> bool {
+        self.get_memo_from_table_for(db.zalsa(), input)
+            .is_some_and(|memo| !memo.may_be_provisional())
+    }
+
     fn cycle_recovery_strategy(&self) -> CycleRecoveryStrategy {
         C::CYCLE_STRATEGY
     }
