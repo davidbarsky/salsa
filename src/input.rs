@@ -11,14 +11,18 @@ pub mod singleton;
 use input_field::FieldIngredientImpl;
 
 use crate::{
-    accumulator::accumulated_map::InputAccumulatedValues,
+    accumulator::accumulated_map::{AccumulatedMap, InputAccumulatedValues},
     cycle::CycleRecoveryStrategy,
     id::{AsId, FromIdWithDb},
     ingredient::{fmt_index, Ingredient, MaybeChangedAfter},
     input::singleton::{Singleton, SingletonChoice},
     key::{DatabaseKeyIndex, InputDependencyIndex},
     plumbing::{Jar, Stamp},
-    table::{memo::MemoTable, sync::SyncTable, Slot, Table},
+    table::{
+        memo::{MemoTable, MemoTableTypes},
+        sync::SyncTable,
+        Slot, Table,
+    },
     zalsa::{IngredientIndex, Zalsa},
     zalsa_local::QueryOrigin,
     Database, Durability, Id, Revision, Runtime,
@@ -76,6 +80,7 @@ impl<C: Configuration> Jar for JarImpl<C> {
 pub struct IngredientImpl<C: Configuration> {
     ingredient_index: IngredientIndex,
     singleton: C::Singleton,
+    memo_table_types: MemoTableTypes,
     _phantom: std::marker::PhantomData<C::Struct>,
 }
 
@@ -84,6 +89,7 @@ impl<C: Configuration> IngredientImpl<C> {
         Self {
             ingredient_index: index,
             singleton: Default::default(),
+            memo_table_types: MemoTableTypes::default(),
             _phantom: std::marker::PhantomData,
         }
     }
@@ -257,6 +263,18 @@ impl<C: Configuration> Ingredient for IngredientImpl<C> {
     fn debug_name(&self) -> &'static str {
         C::DEBUG_NAME
     }
+
+    fn accumulated<'db>(
+        &'db self,
+        _db: &'db dyn Database,
+        _key_index: Id,
+    ) -> (Option<&'db AccumulatedMap>, InputAccumulatedValues) {
+        (None, InputAccumulatedValues::Any)
+    }
+
+    fn memo_table_types(&self) -> &MemoTableTypes {
+        &self.memo_table_types
+    }
 }
 
 impl<C: Configuration> std::fmt::Debug for IngredientImpl<C> {
@@ -316,5 +334,9 @@ where
 
     unsafe fn syncs(&self, _current_revision: Revision) -> &SyncTable {
         &self.syncs
+    }
+
+    unsafe fn drop_memos(&mut self, types: &MemoTableTypes) {
+        self.memos.drop(types);
     }
 }
