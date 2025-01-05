@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crossbeam::atomic::AtomicCell;
 
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
+use crate::zalsa::MemoIngredientIndex;
 use crate::zalsa_local::QueryOrigin;
 use crate::{
     key::DatabaseKeyIndex, zalsa::Zalsa, zalsa_local::QueryRevisions, Event, EventKind, Id,
@@ -38,11 +39,12 @@ impl<C: Configuration> IngredientImpl<C> {
         zalsa: &'db Zalsa,
         id: Id,
         memo: ArcMemo<'db, C>,
+        memo_ingredient_index: MemoIngredientIndex,
     ) -> Option<ArcMemo<'db, C>> {
         let static_memo = unsafe { self.to_static(memo) };
         let old_static_memo = zalsa
             .memo_table_for(id)
-            .insert(self.memo_ingredient_index, static_memo)?;
+            .insert(memo_ingredient_index, static_memo)?;
         unsafe { Some(self.to_self(old_static_memo)) }
     }
 
@@ -53,8 +55,9 @@ impl<C: Configuration> IngredientImpl<C> {
         &'db self,
         zalsa: &'db Zalsa,
         id: Id,
+        memo_ingredient_index: MemoIngredientIndex,
     ) -> Option<ArcMemo<'db, C>> {
-        let static_memo = zalsa.memo_table_for(id).get(self.memo_ingredient_index)?;
+        let static_memo = zalsa.memo_table_for(id).get(memo_ingredient_index)?;
         unsafe { Some(self.to_self(static_memo)) }
     }
 
