@@ -11,6 +11,9 @@ use common::LogDatabase;
 use salsa::Database as _;
 use test_log::test;
 
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[derive(Debug, PartialEq, Eq)]
 struct HotPotato(u32);
 
@@ -36,9 +39,32 @@ struct MyInput {
     field: u32,
 }
 
+#[salsa::interned]
+struct MyInterned<'db> {
+    field: u32,
+}
+
+#[salsa::tracked(lru = 32)]
+fn get_hot_potato_interned<'db>(db: &'db dyn LogDatabase, input: MyInterned<'db>) -> Arc<HotPotato> {
+    db.push_log(format!("get_hot_potato({:?})", input.field(db)));
+    Arc::new(HotPotato::new(input.field(db)))
+}
+
+#[salsa::tracked]
+fn get_hot_potato_interned_no_lru<'db>(db: &'db dyn LogDatabase, input: MyInterned<'db>) -> Arc<HotPotato> {
+    db.push_log(format!("get_hot_potato_lru({:?})", input.field(db)));
+    Arc::new(HotPotato::new(input.field(db)))
+}
+
 #[salsa::tracked(lru = 32)]
 fn get_hot_potato(db: &dyn LogDatabase, input: MyInput) -> Arc<HotPotato> {
     db.push_log(format!("get_hot_potato({:?})", input.field(db)));
+    Arc::new(HotPotato::new(input.field(db)))
+}
+
+#[salsa::tracked]
+fn get_hot_potato_no_lru(db: &dyn LogDatabase, input: MyInput) -> Arc<HotPotato> {
+    db.push_log(format!("get_hot_potato_lru({:?})", input.field(db)));
     Arc::new(HotPotato::new(input.field(db)))
 }
 
@@ -60,19 +86,113 @@ fn load_n_potatoes() -> usize {
 }
 
 #[test]
-fn lru_works() {
+fn interned_no_lru() {
+    let _profiler = dhat::Profiler::builder().testing().build();
     let db = common::LoggerDatabase::default();
     assert_eq!(load_n_potatoes(), 0);
 
-    for i in 0..128u32 {
+    for i in 0..32 {
+        let input = MyInterned::new(&db, i);
+        let p = get_hot_potato_interned_no_lru(&db, input);
+        assert_eq!(p.0, i)
+    }
+
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated before LRU: {}", &stats.curr_bytes);
+
+    for i in 32..256 {
+        let input = MyInterned::new(&db, i);
+        let p = get_hot_potato_interned_no_lru(&db, input);
+        assert_eq!(p.0, i)
+    }
+
+    assert_eq!(load_n_potatoes(), 256);
+
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated after LRU: {}", &stats.curr_bytes);
+}
+
+#[test]
+fn interned_lru_works() {
+    let _profiler = dhat::Profiler::builder().testing().build();
+    let db = common::LoggerDatabase::default();
+    assert_eq!(load_n_potatoes(), 0);
+
+    for i in 0..32 {
+        let input = MyInterned::new(&db, i);
+        let p = get_hot_potato_interned(&db, input);
+        assert_eq!(p.0, i)
+    }
+
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated before LRU: {}", &stats.curr_bytes);
+
+    // make sure these are LRU'd.
+    for i in 32..256 {
+        let input = MyInterned::new(&db, i);
+        let p = get_hot_potato_interned(&db, input);
+        assert_eq!(p.0, i)
+    }
+    assert_eq!(load_n_potatoes(), 32);
+
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated after LRU: {}", &stats.curr_bytes);
+}
+
+#[test]
+fn input_no_lru() {
+    let _profiler = dhat::Profiler::builder().testing().build();
+    let db = common::LoggerDatabase::default();
+    assert_eq!(load_n_potatoes(), 0);
+
+    for i in 0..32 {
+        let input = MyInput::new(&db, i);
+        let p = get_hot_potato_no_lru(&db, input);
+        assert_eq!(p.0, i)
+    }
+
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated before LRU: {}", &stats.curr_bytes);
+
+    // make sure these are LRU'd.
+    for i in 32..256 {
+        let input = MyInput::new(&db, i);
+        let p = get_hot_potato_no_lru(&db, input);
+        assert_eq!(p.0, i)
+    }
+
+    assert_eq!(load_n_potatoes(), 256);
+
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated after LRU: {}", &stats.curr_bytes);
+}
+
+#[test]
+fn input_lru_works() {
+    let _profiler = dhat::Profiler::builder().testing().build();
+    let db = common::LoggerDatabase::default();
+    assert_eq!(load_n_potatoes(), 0);
+
+    for i in 0..32 {
         let input = MyInput::new(&db, i);
         let p = get_hot_potato(&db, input);
         assert_eq!(p.0, i)
     }
 
-    // Create a new input to change the revision, and trigger the GC
-    MyInput::new(&db, 0);
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated before LRU: {}", &stats.curr_bytes);
+
+    // make sure these are LRU'd.
+    for i in 32..256 {
+        let input = MyInput::new(&db, i);
+        let p = get_hot_potato(&db, input);
+        assert_eq!(p.0, i)
+    }
+
     assert_eq!(load_n_potatoes(), 32);
+
+    let stats = dhat::HeapStats::get();
+    eprintln!("Allocated after LRU: {}", &stats.curr_bytes);
 }
 
 #[test]
