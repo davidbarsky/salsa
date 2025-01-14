@@ -128,10 +128,10 @@ impl<C> IngredientImpl<C>
 where
     C: Configuration,
 {
-    pub fn new(index: IngredientIndex, aux: &dyn JarAux) -> Self {
+    pub fn new(struct_index: IngredientIndex, index: IngredientIndex, aux: &dyn JarAux) -> Self {
         Self {
             index,
-            memo_ingredient_index: aux.next_memo_ingredient_index(index),
+            memo_ingredient_index: aux.next_memo_ingredient_index(struct_index, index),
             lru: Default::default(),
             deleted_entries: Default::default(),
         }
@@ -194,12 +194,11 @@ where
     fn maybe_changed_after(
         &self,
         db: &dyn Database,
-        input: Option<Id>,
+        input: Id,
         revision: Revision,
     ) -> VerifyResult {
-        let key = input.unwrap();
         let db = db.as_view::<C::DbView>();
-        self.maybe_changed_after(db, key, revision)
+        self.maybe_changed_after(db, input, revision)
     }
 
     fn is_verified_final<'db>(&'db self, db: &'db dyn Database, input: Id) -> bool {
@@ -219,9 +218,8 @@ where
         &self,
         db: &dyn Database,
         executor: DatabaseKeyIndex,
-        output_key: Option<crate::Id>,
+        output_key: crate::Id,
     ) {
-        let output_key = output_key.unwrap();
         self.validate_specified_value(db, executor, output_key);
     }
 
@@ -229,7 +227,7 @@ where
         &self,
         _db: &dyn Database,
         _executor: DatabaseKeyIndex,
-        _stale_output_key: Option<crate::Id>,
+        _stale_output_key: crate::Id,
     ) {
         // This function is invoked when a query Q specifies the value for `stale_output_key` in rev 1,
         // but not in rev 2. We don't do anything in this case, we just leave the (now stale) memo.

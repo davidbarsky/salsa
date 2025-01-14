@@ -4,8 +4,7 @@ use tracing::debug;
 use crate::accumulator::accumulated_map::{AccumulatedMap, InputAccumulatedValues};
 use crate::active_query::ActiveQuery;
 use crate::durability::Durability;
-use crate::key::DatabaseKeyIndex;
-use crate::key::DependencyIndex;
+use crate::key::{DatabaseKeyIndex, InputDependencyIndex, OutputDependencyIndex};
 use crate::runtime::StampedValue;
 use crate::table::PageIndex;
 use crate::table::Slot;
@@ -20,7 +19,6 @@ use crate::EventKind;
 use crate::Id;
 use crate::Revision;
 use std::cell::RefCell;
-use std::sync::Arc;
 
 /// State that is specific to a single execution thread.
 ///
@@ -58,7 +56,7 @@ impl ZalsaLocal {
         &self,
         table: &Table,
         ingredient: IngredientIndex,
-        mut value: impl FnOnce() -> T,
+        mut value: impl FnOnce(Id) -> T,
     ) -> Id {
         // Find the most recent page, pushing a page if needed
         let mut page = *self
@@ -71,7 +69,7 @@ impl ZalsaLocal {
             // Try to allocate an entry on that page
             let page_ref = table.page::<T>(page);
             match page_ref.allocate(page, value) {
-                // If succesful, return
+                // If succesfull, return
                 Ok(id) => return id,
 
                 // Otherwise, create a new page and try again
@@ -98,10 +96,6 @@ impl ZalsaLocal {
     /// Executes a closure within the context of the current active query stacks.
     pub(crate) fn with_query_stack<R>(&self, c: impl FnOnce(&mut Vec<ActiveQuery>) -> R) -> R {
         c(self.query_stack.borrow_mut().as_mut())
-    }
-
-    fn query_in_progress(&self) -> bool {
-        self.with_query_stack(|stack| !stack.is_empty())
     }
 
     /// Returns the index of the active query along with its *current* durability/changed-at
@@ -140,7 +134,7 @@ impl ZalsaLocal {
     }
 
     /// Add an output to the current query's list of dependencies
-    pub(crate) fn add_output(&self, entity: DependencyIndex) {
+    pub(crate) fn add_output(&self, entity: OutputDependencyIndex) {
         self.with_query_stack(|stack| {
             if let Some(top_query) = stack.last_mut() {
                 top_query.add_output(entity)
@@ -149,7 +143,7 @@ impl ZalsaLocal {
     }
 
     /// Check whether `entity` is an output of the currently active query (if any)
-    pub(crate) fn is_output_of_active_query(&self, entity: DependencyIndex) -> bool {
+    pub(crate) fn is_output_of_active_query(&self, entity: OutputDependencyIndex) -> bool {
         self.with_query_stack(|stack| {
             if let Some(top_query) = stack.last_mut() {
                 top_query.is_output(entity)
@@ -162,7 +156,7 @@ impl ZalsaLocal {
     /// Register that currently active query reads the given input
     pub(crate) fn report_tracked_read(
         &self,
-        input: DependencyIndex,
+        input: InputDependencyIndex,
         durability: Durability,
         changed_at: Revision,
         accumulated: InputAccumulatedValues,
@@ -216,13 +210,10 @@ impl ZalsaLocal {
     ///   * the disambiguator index
     #[track_caller]
     pub(crate) fn disambiguate(&self, key: IdentityHash) -> (StampedValue<()>, Disambiguator) {
-        assert!(
-            self.query_in_progress(),
-            "cannot create a tracked struct disambiguator outside of a tracked function"
-        );
-
         self.with_query_stack(|stack| {
-            let top_query = stack.last_mut().unwrap();
+            let top_query = stack.last_mut().expect(
+                "cannot create a tracked struct disambiguator outside of a tracked function",
+            );
             let disambiguator = top_query.disambiguate(key);
             (
                 StampedValue {
@@ -237,25 +228,20 @@ impl ZalsaLocal {
 
     #[track_caller]
     pub(crate) fn tracked_struct_id(&self, identity: &Identity) -> Option<Id> {
-        debug_assert!(
-            self.query_in_progress(),
-            "cannot create a tracked struct disambiguator outside of a tracked function"
-        );
-
         self.with_query_stack(|stack| {
-            let top_query = stack.last().unwrap();
+            let top_query = stack.last().expect(
+                "cannot create a tracked struct disambiguator outside of a tracked function",
+            );
             top_query.tracked_struct_ids.get(identity).copied()
         })
     }
 
     #[track_caller]
     pub(crate) fn store_tracked_struct_id(&self, identity: Identity, id: Id) {
-        debug_assert!(
-            self.query_in_progress(),
-            "cannot create a tracked struct disambiguator outside of a tracked function"
-        );
         self.with_query_stack(|stack| {
-            let top_query = stack.last_mut().unwrap();
+            let top_query = stack.last_mut().expect(
+                "cannot create a tracked struct disambiguator outside of a tracked function",
+            );
             let old_id = top_query.tracked_struct_ids.insert(identity, id);
             assert!(
                 old_id.is_none(),
@@ -277,12 +263,7 @@ impl ZalsaLocal {
     /// `salsa_event` is emitted when this method is called, so that should be
     /// used instead.
     pub(crate) fn unwind_if_revision_cancelled(&self, db: &dyn Database) {
-        let thread_id = std::thread::current().id();
-        db.salsa_event(&|| Event {
-            thread_id,
-
-            kind: EventKind::WillCheckCancellation,
-        });
+        db.salsa_event(&|| Event::new(EventKind::WillCheckCancellation));
         let zalsa = db.zalsa();
         if zalsa.load_cancellation_flag() {
             self.unwind_cancelled(zalsa.current_revision());
@@ -300,7 +281,8 @@ impl std::panic::RefUnwindSafe for ZalsaLocal {}
 
 /// Summarizes "all the inputs that a query used"
 /// and "all the outputs its wrote to"
-#[derive(Debug, Clone)]
+#[derive(Debug)]
+// #[derive(Clone)] cloning this is expensive, so we don't derive
 pub(crate) struct QueryRevisions {
     /// The most revision in which some input changed.
     pub(crate) changed_at: Revision,
@@ -411,7 +393,7 @@ pub enum QueryOrigin {
 
 impl QueryOrigin {
     /// Indices for queries *read* by this query
-    pub(crate) fn inputs(&self) -> impl DoubleEndedIterator<Item = DependencyIndex> + '_ {
+    pub(crate) fn inputs(&self) -> impl DoubleEndedIterator<Item = InputDependencyIndex> + '_ {
         let opt_edges = match self {
             QueryOrigin::Derived(edges) | QueryOrigin::DerivedUntracked(edges) => Some(edges),
             QueryOrigin::Assigned(_) | QueryOrigin::BaseInput | QueryOrigin::FixpointInitial => {
@@ -422,7 +404,7 @@ impl QueryOrigin {
     }
 
     /// Indices for queries *written* by this query (if any)
-    pub(crate) fn outputs(&self) -> impl DoubleEndedIterator<Item = DependencyIndex> + '_ {
+    pub(crate) fn outputs(&self) -> impl DoubleEndedIterator<Item = OutputDependencyIndex> + '_ {
         let opt_edges = match self {
             QueryOrigin::Derived(edges) | QueryOrigin::DerivedUntracked(edges) => Some(edges),
             QueryOrigin::Assigned(_) | QueryOrigin::BaseInput | QueryOrigin::FixpointInitial => {
@@ -431,16 +413,6 @@ impl QueryOrigin {
         };
         opt_edges.into_iter().flat_map(|edges| edges.outputs())
     }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy, Hash)]
-pub enum EdgeKind {
-    Input,
-    Output,
-}
-
-lazy_static::lazy_static! {
-    pub(crate) static ref EMPTY_DEPENDENCIES: Arc<[(EdgeKind, DependencyIndex)]> = Arc::new([]);
 }
 
 /// The edges between a memoized value and other queries in the dependency graph.
@@ -462,33 +434,42 @@ pub struct QueryEdges {
     /// Important:
     ///
     /// * The inputs must be in **execution order** for the red-green algorithm to work.
-    pub input_outputs: Arc<[(EdgeKind, DependencyIndex)]>,
+    // pub input_outputs: ThinBox<[DependencyEdge]>, once that is a thing
+    pub input_outputs: Box<[QueryEdge]>,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub enum QueryEdge {
+    Input(InputDependencyIndex),
+    Output(OutputDependencyIndex),
 }
 
 impl QueryEdges {
     /// Returns the (tracked) inputs that were executed in computing this memoized value.
     ///
     /// These will always be in execution order.
-    pub(crate) fn inputs(&self) -> impl DoubleEndedIterator<Item = DependencyIndex> + '_ {
-        self.input_outputs
-            .iter()
-            .filter(|(edge_kind, _)| *edge_kind == EdgeKind::Input)
-            .map(|(_, dependency_index)| *dependency_index)
+    pub(crate) fn inputs(&self) -> impl DoubleEndedIterator<Item = InputDependencyIndex> + '_ {
+        self.input_outputs.iter().filter_map(|&edge| match edge {
+            QueryEdge::Input(dependency_index) => Some(dependency_index),
+            QueryEdge::Output(_) => None,
+        })
     }
 
     /// Returns the (tracked) outputs that were executed in computing this memoized value.
     ///
     /// These will always be in execution order.
-    pub(crate) fn outputs(&self) -> impl DoubleEndedIterator<Item = DependencyIndex> + '_ {
-        self.input_outputs
-            .iter()
-            .filter(|(edge_kind, _)| *edge_kind == EdgeKind::Output)
-            .map(|(_, dependency_index)| *dependency_index)
+    pub(crate) fn outputs(&self) -> impl DoubleEndedIterator<Item = OutputDependencyIndex> + '_ {
+        self.input_outputs.iter().filter_map(|&edge| match edge {
+            QueryEdge::Output(dependency_index) => Some(dependency_index),
+            QueryEdge::Input(_) => None,
+        })
     }
 
     /// Creates a new `QueryEdges`; the values given for each field must meet struct invariants.
-    pub(crate) fn new(input_outputs: Arc<[(EdgeKind, DependencyIndex)]>) -> Self {
-        Self { input_outputs }
+    pub(crate) fn new(input_outputs: impl IntoIterator<Item = QueryEdge>) -> Self {
+        Self {
+            input_outputs: input_outputs.into_iter().collect(),
+        }
     }
 }
 

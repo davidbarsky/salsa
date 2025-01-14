@@ -62,31 +62,47 @@ impl<C: Configuration> IngredientImpl<C> {
     /// with an equivalent memo that has no value. If the memo is untracked, BaseInput,
     /// or has values assigned as output of another query, this has no effect.
     pub(super) fn evict_value_from_memo_for<'db>(&'db self, zalsa: &'db Zalsa, id: Id) {
-        let Some(memo) = self.get_memo_from_table_for(zalsa, id) else {
-            return;
-        };
-
-        match memo.revisions.origin {
-            QueryOrigin::Assigned(_)
-            | QueryOrigin::DerivedUntracked(_)
-            | QueryOrigin::BaseInput
-            | QueryOrigin::FixpointInitial => {
-                // Careful: Cannot evict memos whose values were
-                // assigned as output of another query
-                // or those with untracked inputs
-                // as their values cannot be reconstructed.
-            }
-
-            QueryOrigin::Derived(_) => {
-                let memo_evicted = Arc::new(Memo::new(
-                    None::<C::Output<'_>>,
-                    memo.verified_at.load(),
-                    memo.revisions.clone(),
-                ));
-
-                self.insert_memo_into_table_for(zalsa, id, memo_evicted);
-            }
-        }
+        zalsa.memo_table_for(id).map_memo::<Memo<C::Output<'_>>>(
+            self.memo_ingredient_index,
+            |memo| {
+                match memo.revisions.origin {
+                    QueryOrigin::Assigned(_)
+                    | QueryOrigin::DerivedUntracked(_)
+                    | QueryOrigin::BaseInput
+                    | QueryOrigin::FixpointInitial => {
+                        // Careful: Cannot evict memos whose values were
+                        // assigned as output of another query
+                        // or those with untracked inputs
+                        // as their values cannot be reconstructed.
+                        memo
+                    }
+                    QueryOrigin::Derived(_) => {
+                        // QueryRevisions: !Clone to discourage cloning, we need it here though
+                        let QueryRevisions {
+                            changed_at,
+                            durability,
+                            origin,
+                            tracked_struct_ids,
+                            accumulated,
+                            cycle_heads,
+                        } = &memo.revisions;
+                        // Re-assemble the memo but with the value set to `None`
+                        Arc::new(Memo::new(
+                            None,
+                            memo.verified_at.load(),
+                            QueryRevisions {
+                                changed_at: *changed_at,
+                                durability: *durability,
+                                origin: origin.clone(),
+                                tracked_struct_ids: tracked_struct_ids.clone(),
+                                accumulated: accumulated.clone(),
+                                cycle_heads: cycle_heads.clone(),
+                            },
+                        ))
+                    }
+                }
+            },
+        );
     }
 
     pub(super) fn initial_value<'db>(
@@ -162,11 +178,10 @@ impl<V> Memo<V> {
         revision_now: Revision,
         database_key_index: DatabaseKeyIndex,
     ) {
-        db.salsa_event(&|| Event {
-            thread_id: std::thread::current().id(),
-            kind: EventKind::DidValidateMemoizedValue {
+        db.salsa_event(&|| {
+            Event::new(EventKind::DidValidateMemoizedValue {
                 database_key: database_key_index,
-            },
+            })
         });
 
         self.verified_at.store(revision_now);

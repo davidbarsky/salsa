@@ -1,14 +1,15 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::zalsa_local::{EdgeKind, QueryEdges, QueryOrigin, QueryRevisions};
+use super::zalsa_local::{QueryEdges, QueryOrigin, QueryRevisions};
+use crate::key::OutputDependencyIndex;
 use crate::tracked_struct::IdentityHash;
+use crate::zalsa_local::QueryEdge;
 use crate::{
     accumulator::accumulated_map::{AccumulatedMap, InputAccumulatedValues},
     durability::Durability,
     hash::FxIndexSet,
-    key::{DatabaseKeyIndex, DependencyIndex},
+    key::{DatabaseKeyIndex, InputDependencyIndex},
     tracked_struct::{Disambiguator, Identity},
-    zalsa_local::EMPTY_DEPENDENCIES,
     Id, Revision,
 };
 
@@ -30,7 +31,7 @@ pub(crate) struct ActiveQuery {
     /// * tracked structs created
     /// * invocations of `specify`
     /// * accumulators pushed to
-    input_outputs: FxIndexSet<(EdgeKind, DependencyIndex)>,
+    input_outputs: FxIndexSet<QueryEdge>,
 
     /// True if there was an untracked read.
     untracked_read: bool,
@@ -73,13 +74,13 @@ impl ActiveQuery {
 
     pub(super) fn add_read(
         &mut self,
-        input: DependencyIndex,
+        input: InputDependencyIndex,
         durability: Durability,
         revision: Revision,
         accumulated: InputAccumulatedValues,
         cycle_heads: Option<&FxHashSet<DatabaseKeyIndex>>,
     ) {
-        self.input_outputs.insert((EdgeKind::Input, input));
+        self.input_outputs.insert(QueryEdge::Input(input));
         self.durability = self.durability.min(durability);
         self.changed_at = self.changed_at.max(revision);
         self.accumulated.add_input(accumulated);
@@ -101,24 +102,17 @@ impl ActiveQuery {
     }
 
     /// Adds a key to our list of outputs.
-    pub(super) fn add_output(&mut self, key: DependencyIndex) {
-        self.input_outputs.insert((EdgeKind::Output, key));
+    pub(super) fn add_output(&mut self, key: OutputDependencyIndex) {
+        self.input_outputs.insert(QueryEdge::Output(key));
     }
 
     /// True if the given key was output by this query.
-    pub(super) fn is_output(&self, key: DependencyIndex) -> bool {
-        self.input_outputs.contains(&(EdgeKind::Output, key))
+    pub(super) fn is_output(&self, key: OutputDependencyIndex) -> bool {
+        self.input_outputs.contains(&QueryEdge::Output(key))
     }
 
     pub(crate) fn into_revisions(self) -> QueryRevisions {
-        let input_outputs = if self.input_outputs.is_empty() {
-            EMPTY_DEPENDENCIES.clone()
-        } else {
-            self.input_outputs.into_iter().collect()
-        };
-
-        let edges = QueryEdges::new(input_outputs);
-
+        let edges = QueryEdges::new(self.input_outputs);
         let origin = if self.untracked_read {
             QueryOrigin::DerivedUntracked(edges)
         } else {

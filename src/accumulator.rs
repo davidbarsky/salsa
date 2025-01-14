@@ -54,6 +54,10 @@ impl<A: Accumulator> Jar for JarImpl<A> {
     ) -> Vec<Box<dyn Ingredient>> {
         vec![Box::new(<IngredientImpl<A>>::new(first_index))]
     }
+
+    fn salsa_struct_type_id(&self) -> Option<std::any::TypeId> {
+        None
+    }
 }
 
 pub struct IngredientImpl<A: Accumulator> {
@@ -62,7 +66,7 @@ pub struct IngredientImpl<A: Accumulator> {
 }
 
 impl<A: Accumulator> IngredientImpl<A> {
-    /// Find the accumulator ingrediate for `A` in the database, if any.
+    /// Find the accumulator ingredient for `A` in the database, if any.
     pub fn from_db<Db>(db: &Db) -> Option<&Self>
     where
         Db: ?Sized + Database,
@@ -101,7 +105,7 @@ impl<A: Accumulator> Ingredient for IngredientImpl<A> {
     fn maybe_changed_after(
         &self,
         _db: &dyn Database,
-        _input: Option<Id>,
+        _input: Id,
         _revision: Revision,
     ) -> VerifyResult {
         panic!("nothing should ever depend on an accumulator directly")
@@ -123,7 +127,7 @@ impl<A: Accumulator> Ingredient for IngredientImpl<A> {
         &self,
         _db: &dyn Database,
         _executor: DatabaseKeyIndex,
-        _output_key: Option<crate::Id>,
+        _output_key: crate::Id,
     ) {
     }
 
@@ -131,7 +135,7 @@ impl<A: Accumulator> Ingredient for IngredientImpl<A> {
         &self,
         _db: &dyn Database,
         _executor: DatabaseKeyIndex,
-        _stale_output_key: Option<crate::Id>,
+        _stale_output_key: crate::Id,
     ) {
     }
 

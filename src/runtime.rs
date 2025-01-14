@@ -179,12 +179,11 @@ impl Runtime {
             return BlockResult::Cycle;
         }
 
-        db.salsa_event(&|| Event {
-            thread_id,
-            kind: EventKind::WillBlockOn {
+        db.salsa_event(&|| {
+            Event::new(EventKind::WillBlockOn {
                 other_thread_id: other_id,
                 database_key,
-            },
+            })
         });
 
         let result = local_state.with_query_stack(|stack| {

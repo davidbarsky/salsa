@@ -1,4 +1,4 @@
-use std::{fmt, hash::Hash, marker::PhantomData, ops::DerefMut};
+use std::{any::TypeId, fmt, hash::Hash, marker::PhantomData, ops::DerefMut};
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use tracked_field::FieldIngredientImpl;
@@ -8,7 +8,7 @@ use crate::{
     cycle::CycleRecoveryStrategy,
     function::VerifyResult,
     ingredient::{fmt_index, Ingredient, Jar, JarAux},
-    key::{DatabaseKeyIndex, DependencyIndex},
+    key::{DatabaseKeyIndex, InputDependencyIndex},
     plumbing::ZalsaLocal,
     runtime::StampedValue,
     salsa_struct::SalsaStructInDb,
@@ -113,6 +113,10 @@ impl<C: Configuration> Jar for JarImpl<C> {
                 Box::new(<FieldIngredientImpl<C>>::new(struct_index, field_index)) as _
             }))
             .collect()
+    }
+
+    fn salsa_struct_type_id(&self) -> Option<TypeId> {
+        Some(TypeId::of::<<C as Configuration>::Struct<'static>>())
     }
 }
 
@@ -317,7 +321,7 @@ where
         current_deps: &StampedValue<()>,
         fields: C::Fields<'db>,
     ) -> Id {
-        let value = || Value {
+        let value = |_| Value {
             updated_at: AtomicCell::new(Some(current_revision)),
             durability: current_deps.durability,
             fields: unsafe { self.to_static(fields) },
@@ -336,7 +340,7 @@ where
             // Overwrite the free-list entry. Use `*foo = ` because the entry
             // has been previously initialized and we want to free the old contents.
             unsafe {
-                *data_raw = value();
+                *data_raw = value(id);
             }
 
             id
@@ -466,11 +470,10 @@ where
     /// unspecified results (but not UB). See [`InternedIngredient::delete_index`] for more
     /// discussion and important considerations.
     pub(crate) fn delete_entity(&self, db: &dyn crate::Database, id: Id) {
-        db.salsa_event(&|| Event {
-            thread_id: std::thread::current().id(),
-            kind: crate::EventKind::DidDiscard {
+        db.salsa_event(&|| {
+            Event::new(crate::EventKind::DidDiscard {
                 key: self.database_key_index(id),
-            },
+            })
         });
 
         let zalsa = db.zalsa();
@@ -503,22 +506,18 @@ where
         // and the code that references the memo-table has a read-lock.
         let memo_table = unsafe { (*data).take_memo_table() };
         for (memo_ingredient_index, memo) in memo_table.into_memos() {
-            let ingredient_index = zalsa.ingredient_index_for_memo(memo_ingredient_index);
+            let ingredient_index =
+                zalsa.ingredient_index_for_memo(self.ingredient_index, memo_ingredient_index);
 
             let executor = DatabaseKeyIndex {
                 ingredient_index,
                 key_index: id,
             };
 
-            db.salsa_event(&|| Event {
-                thread_id: std::thread::current().id(),
-                kind: EventKind::DidDiscard { key: executor },
-            });
+            db.salsa_event(&|| Event::new(EventKind::DidDiscard { key: executor }));
 
             for stale_output in memo.origin().outputs() {
-                zalsa
-                    .lookup_ingredient(stale_output.ingredient_index)
-                    .remove_stale_output(db, executor, stale_output.key_index);
+                stale_output.remove_stale_output(db, executor);
             }
         }
 
@@ -557,10 +556,7 @@ where
         let field_changed_at = data.revisions[field_index];
 
         zalsa_local.report_tracked_read(
-            DependencyIndex {
-                ingredient_index: field_ingredient_index,
-                key_index: Some(id),
-            },
+            InputDependencyIndex::new(field_ingredient_index, id),
             data.durability,
             field_changed_at,
             InputAccumulatedValues::Empty,
@@ -582,7 +578,7 @@ where
     fn maybe_changed_after(
         &self,
         _db: &dyn Database,
-        _input: Option<Id>,
+        _input: Id,
         _revision: Revision,
     ) -> VerifyResult {
         VerifyResult::unchanged()
@@ -604,7 +600,7 @@ where
         &'db self,
         _db: &'db dyn Database,
         _executor: DatabaseKeyIndex,
-        _output_key: Option<crate::Id>,
+        _output_key: crate::Id,
     ) {
         // we used to update `update_at` field but now we do it lazilly when data is accessed
         //
@@ -615,13 +611,13 @@ where
         &self,
         db: &dyn Database,
         _executor: DatabaseKeyIndex,
-        stale_output_key: Option<crate::Id>,
+        stale_output_key: crate::Id,
     ) {
         // This method is called when, in prior revisions,
         // `executor` creates a tracked struct `salsa_output_key`,
         // but it did not in the current revision.
         // In that case, we can delete `stale_output_key` and any data associated with it.
-        self.delete_entity(db.as_dyn_database(), stale_output_key.unwrap());
+        self.delete_entity(db.as_dyn_database(), stale_output_key);
     }
 
     fn fmt_index(&self, index: Option<crate::Id>, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {

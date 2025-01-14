@@ -53,11 +53,10 @@ where
     fn maybe_changed_after(
         &self,
         db: &dyn Database,
-        input: Option<Id>,
+        input: Id,
         revision: Revision,
     ) -> VerifyResult {
         let zalsa = db.zalsa();
-        let input = input.unwrap();
         let value = <IngredientImpl<C>>::data(zalsa, input);
         VerifyResult::changed_if(value.stamps[self.field_index].changed_at > revision)
     }
@@ -74,7 +73,7 @@ where
         &self,
         _db: &dyn Database,
         _executor: DatabaseKeyIndex,
-        _output_key: Option<Id>,
+        _output_key: Id,
     ) {
     }
 
@@ -82,7 +81,7 @@ where
         &self,
         _db: &dyn Database,
         _executor: DatabaseKeyIndex,
-        _stale_output_key: Option<Id>,
+        _stale_output_key: Id,
     ) {
     }
 

@@ -1,9 +1,10 @@
+use dashmap::SharedValue;
+
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::durability::Durability;
 use crate::function::VerifyResult;
-use crate::id::AsId;
 use crate::ingredient::fmt_index;
-use crate::key::DependencyIndex;
+use crate::key::InputDependencyIndex;
 use crate::plumbing::{Jar, JarAux};
 use crate::table::memo::MemoTable;
 use crate::table::sync::SyncTable;
@@ -11,6 +12,7 @@ use crate::table::Slot;
 use crate::zalsa::IngredientIndex;
 use crate::zalsa_local::QueryOrigin;
 use crate::{Database, DatabaseKeyIndex, Id};
+use std::any::TypeId;
 use std::fmt;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::marker::PhantomData;
@@ -94,6 +96,10 @@ impl<C: Configuration> Jar for JarImpl<C> {
     ) -> Vec<Box<dyn Ingredient>> {
         vec![Box::new(IngredientImpl::<C>::new(first_index)) as _]
     }
+
+    fn salsa_struct_type_id(&self) -> Option<std::any::TypeId> {
+        Some(TypeId::of::<<C as Configuration>::Struct<'static>>())
+    }
 }
 
 impl<C> IngredientImpl<C>
@@ -116,74 +122,107 @@ where
         unsafe { std::mem::transmute(data) }
     }
 
-    pub fn intern_id<'db>(
+    /// Intern data to a unique reference.
+    ///
+    /// If `key` is already interned, returns the existing [`Id`] for the interned data without
+    /// invoking `assemble`.
+    /// Otherwise, invokes `assemble` with the given `key` and the [`Id`] to be allocated for this
+    /// interned value. The resulting [`C::Data`] will then be interned.
+    ///
+    /// Note: Using the database within the `assemble` function may result in a deadlock if
+    /// the database ends up trying to intern or allocate a new value.
+    pub fn intern<'db, Key>(
         &'db self,
         db: &'db dyn crate::Database,
-        data: impl Lookup<C::Data<'db>>,
-    ) -> crate::Id {
-        C::deref_struct(self.intern(db, data)).as_id()
+        key: Key,
+        assemble: impl FnOnce(Id, Key) -> C::Data<'db>,
+    ) -> C::Struct<'db>
+    where
+        Key: Hash,
+        C::Data<'db>: HashEqLike<Key>,
+    {
+        C::struct_from_id(self.intern_id(db, key, assemble))
     }
 
     /// Intern data to a unique reference.
-    pub fn intern<'db>(
+    ///
+    /// If `key` is already interned, returns the existing [`Id`] for the interned data without
+    /// invoking `assemble`.
+    /// Otherwise, invokes `assemble` with the given `key` and the [`Id`] to be allocated for this
+    /// interned value. The resulting [`C::Data`] will then be interned.
+    ///
+    /// Note: Using the database within the `assemble` function may result in a deadlock if
+    /// the database ends up trying to intern or allocate a new value.
+    pub fn intern_id<'db, Key>(
         &'db self,
         db: &'db dyn crate::Database,
-        data: impl Lookup<C::Data<'db>>,
-    ) -> C::Struct<'db> {
+        key: Key,
+        assemble: impl FnOnce(Id, Key) -> C::Data<'db>,
+    ) -> crate::Id
+    where
+        Key: Hash,
+        // We'd want the following predicate, but this currently implies `'static` due to a rustc
+        // bug
+        // for<'db> C::Data<'db>: HashEqLike<Key>,
+        // so instead we go with this and transmute the lifetime in the `eq` closure
+        C::Data<'db>: HashEqLike<Key>,
+    {
         let zalsa_local = db.zalsa_local();
         zalsa_local.report_tracked_read(
-            DependencyIndex::for_table(self.ingredient_index),
+            InputDependencyIndex::for_table(self.ingredient_index),
             Durability::MAX,
             self.reset_at,
             InputAccumulatedValues::Empty,
             None,
         );
 
-        // Optimisation to only get read lock on the map if the data has already
-        // been interned.
-        // We need to use the raw API for this lookup. See the [`Lookup`][] trait definition for an explanation of why.
-        let data_hash = {
-            let mut hasher = self.key_map.hasher().build_hasher();
-            data.hash(&mut hasher);
-            hasher.finish()
+        // Optimization to only get read lock on the map if the data has already been interned.
+        let data_hash = self.key_map.hasher().hash_one(&key);
+        let shard = &self.key_map.shards()[self.key_map.determine_shard(data_hash as _)];
+        let eq = |(data, _): &_| {
+            // SAFETY: it's safe to go from Data<'static> to Data<'db>
+            // shrink lifetime here to use a single lifetime in Lookup::eq(&StructKey<'db>, &C::Data<'db>)
+            let data: &C::Data<'db> = unsafe { std::mem::transmute(data) };
+            HashEqLike::eq(data, &key)
         };
-        let shard = self.key_map.determine_shard(data_hash as _);
+
         {
-            let lock = self.key_map.shards()[shard].read();
-            if let Some(bucket) = lock.find(data_hash, |(a, _)| {
-                // SAFETY: it's safe to go from Data<'static> to Data<'db>
-                // shrink lifetime here to use a single lifetime in Lookup::eq(&StructKey<'db>, &C::Data<'db>)
-                let a: &C::Data<'db> = unsafe { std::mem::transmute(a) };
-                Lookup::eq(&data, a)
-            }) {
+            let lock = shard.read();
+            if let Some(bucket) = lock.find(data_hash, eq) {
                 // SAFETY: Read lock on map is held during this block
-                return C::struct_from_id(unsafe { *bucket.as_ref().1.get() });
+                return unsafe { *bucket.as_ref().1.get() };
             }
-        };
+        }
 
-        let data = data.into_owned();
-
-        let internal_data = unsafe { self.to_internal_data(data) };
-
-        match self.key_map.entry(internal_data.clone()) {
+        let mut lock = shard.write();
+        match lock.find_or_find_insert_slot(data_hash, eq, |(element, _)| {
+            self.key_map.hasher().hash_one(element)
+        }) {
             // Data has been interned by a racing call, use that ID instead
-            dashmap::mapref::entry::Entry::Occupied(entry) => {
-                let id = *entry.get();
-                drop(entry);
-                C::struct_from_id(id)
-            }
-
+            Ok(slot) => unsafe { *slot.as_ref().1.get() },
             // We won any races so should intern the data
-            dashmap::mapref::entry::Entry::Vacant(entry) => {
+            Err(slot) => {
                 let zalsa = db.zalsa();
                 let table = zalsa.table();
-                let next_id = zalsa_local.allocate(table, self.ingredient_index, || Value::<C> {
-                    data: internal_data,
+                let id = zalsa_local.allocate(table, self.ingredient_index, |id| Value::<C> {
+                    data: unsafe { self.to_internal_data(assemble(id, key)) },
                     memos: Default::default(),
                     syncs: Default::default(),
                 });
-                entry.insert(next_id);
-                C::struct_from_id(next_id)
+                unsafe {
+                    lock.insert_in_slot(
+                        data_hash,
+                        slot,
+                        (table.get::<Value<C>>(id).data.clone(), SharedValue::new(id)),
+                    )
+                };
+                debug_assert_eq!(
+                    data_hash,
+                    self.key_map
+                        .hasher()
+                        .hash_one(table.get::<Value<C>>(id).data.clone())
+                );
+                id
             }
         }
     }
@@ -220,7 +259,7 @@ where
     fn maybe_changed_after(
         &self,
         _db: &dyn Database,
-        _input: Option<Id>,
+        _input: Id,
         revision: Revision,
     ) -> VerifyResult {
         VerifyResult::changed_if(revision < self.reset_at)
@@ -242,7 +281,7 @@ where
         &self,
         _db: &dyn Database,
         executor: DatabaseKeyIndex,
-        output_key: Option<crate::Id>,
+        output_key: crate::Id,
     ) {
         unreachable!(
             "mark_validated_output({:?}, {:?}): input cannot be the output of a tracked function",
@@ -254,7 +293,7 @@ where
         &self,
         _db: &dyn Database,
         executor: DatabaseKeyIndex,
-        stale_output_key: Option<crate::Id>,
+        stale_output_key: crate::Id,
     ) {
         unreachable!(
             "remove_stale_output({:?}, {:?}): interned ids are not outputs",
@@ -314,6 +353,12 @@ where
     }
 }
 
+/// A trait for types that hash and compare like `O`.
+pub trait HashEqLike<O> {
+    fn hash<H: Hasher>(&self, h: &mut H);
+    fn eq(&self, data: &O) -> bool;
+}
+
 /// The `Lookup` trait is a more flexible variant on [`std::borrow::Borrow`]
 /// and [`std::borrow::ToOwned`].
 ///
@@ -329,12 +374,14 @@ where
 /// requires that `&(K1...)` be convertible to `&ViewStruct` which just isn't
 /// possible. `Lookup` instead offers direct `hash` and `eq` methods.
 pub trait Lookup<O> {
-    fn hash<H: Hasher>(&self, h: &mut H);
-    fn eq(&self, data: &O) -> bool;
     fn into_owned(self) -> O;
 }
-
-impl<T> Lookup<T> for T
+impl<T> Lookup<T> for T {
+    fn into_owned(self) -> T {
+        self
+    }
+}
+impl<T> HashEqLike<T> for T
 where
     T: Hash + Eq,
 {
@@ -345,26 +392,27 @@ where
     fn eq(&self, data: &T) -> bool {
         self == data
     }
-
-    fn into_owned(self) -> T {
-        self
-    }
 }
 
 impl<T> Lookup<T> for &T
 where
-    T: Clone + Eq + Hash,
+    T: Clone,
 {
-    fn hash<H: Hasher>(&self, h: &mut H) {
-        Hash::hash(self, &mut *h);
-    }
-
-    fn eq(&self, data: &T) -> bool {
-        *self == data
-    }
-
     fn into_owned(self) -> T {
         Clone::clone(self)
+    }
+}
+
+impl<'a, T> HashEqLike<&'a T> for Box<T>
+where
+    T: ?Sized + Hash + Eq,
+    Box<T>: From<&'a T>,
+{
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        Hash::hash(self, &mut *h)
+    }
+    fn eq(&self, data: &&T) -> bool {
+        **self == **data
     }
 }
 
@@ -373,58 +421,51 @@ where
     T: ?Sized + Hash + Eq,
     Box<T>: From<&'a T>,
 {
-    fn hash<H: Hasher>(&self, h: &mut H) {
-        Hash::hash(self, &mut *h)
-    }
-    fn eq(&self, data: &Box<T>) -> bool {
-        **self == **data
-    }
     fn into_owned(self) -> Box<T> {
         Box::from(self)
     }
 }
 
 impl Lookup<String> for &str {
-    fn hash<H: Hasher>(&self, h: &mut H) {
-        Hash::hash(self, &mut *h)
-    }
-
-    fn eq(&self, data: &String) -> bool {
-        self == data
-    }
-
     fn into_owned(self) -> String {
         self.to_owned()
     }
 }
-
-impl<A: Hash + Eq + PartialEq<T> + Clone + Lookup<T>, T> Lookup<Vec<T>> for &[A] {
+impl HashEqLike<&str> for String {
     fn hash<H: Hasher>(&self, h: &mut H) {
-        for a in *self {
-            Hash::hash(a, h);
-        }
+        Hash::hash(self, &mut *h)
     }
 
-    fn eq(&self, data: &Vec<T>) -> bool {
+    fn eq(&self, data: &&str) -> bool {
+        self == *data
+    }
+}
+
+impl<A, T: Hash + Eq + PartialEq<A>> HashEqLike<&[A]> for Vec<T> {
+    fn hash<H: Hasher>(&self, h: &mut H) {
+        Hash::hash(self, h);
+    }
+
+    fn eq(&self, data: &&[A]) -> bool {
         self.len() == data.len() && data.iter().enumerate().all(|(i, a)| &self[i] == a)
     }
-
+}
+impl<A: Hash + Eq + PartialEq<T> + Clone + Lookup<T>, T> Lookup<Vec<T>> for &[A] {
     fn into_owned(self) -> Vec<T> {
         self.iter().map(|a| Lookup::into_owned(a.clone())).collect()
     }
 }
 
-impl<const N: usize, A: Hash + Eq + PartialEq<T> + Clone + Lookup<T>, T> Lookup<Vec<T>> for [A; N] {
+impl<const N: usize, A, T: Hash + Eq + PartialEq<A>> HashEqLike<[A; N]> for Vec<T> {
     fn hash<H: Hasher>(&self, h: &mut H) {
-        for a in self {
-            Hash::hash(a, h);
-        }
+        Hash::hash(self, h);
     }
 
-    fn eq(&self, data: &Vec<T>) -> bool {
+    fn eq(&self, data: &[A; N]) -> bool {
         self.len() == data.len() && data.iter().enumerate().all(|(i, a)| &self[i] == a)
     }
-
+}
+impl<const N: usize, A: Hash + Eq + PartialEq<T> + Clone + Lookup<T>, T> Lookup<Vec<T>> for [A; N] {
     fn into_owned(self) -> Vec<T> {
         self.into_iter()
             .map(|a| Lookup::into_owned(a.clone()))
@@ -432,15 +473,16 @@ impl<const N: usize, A: Hash + Eq + PartialEq<T> + Clone + Lookup<T>, T> Lookup<
     }
 }
 
-impl Lookup<PathBuf> for &Path {
+impl HashEqLike<&Path> for PathBuf {
     fn hash<H: Hasher>(&self, h: &mut H) {
         Hash::hash(self, h);
     }
 
-    fn eq(&self, data: &PathBuf) -> bool {
+    fn eq(&self, data: &&Path) -> bool {
         self == data
     }
-
+}
+impl Lookup<PathBuf> for &Path {
     fn into_owned(self) -> PathBuf {
         self.to_owned()
     }

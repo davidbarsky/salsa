@@ -51,12 +51,11 @@ where
     fn maybe_changed_after<'db>(
         &'db self,
         db: &'db dyn Database,
-        input: Option<Id>,
+        input: Id,
         revision: crate::Revision,
     ) -> VerifyResult {
         let zalsa = db.zalsa();
-        let id = input.unwrap();
-        let data = <super::IngredientImpl<C>>::data(zalsa.table(), id);
+        let data = <super::IngredientImpl<C>>::data(zalsa.table(), input);
         let field_changed_at = data.revisions[self.field_index];
         VerifyResult::changed_if(field_changed_at > revision)
     }
@@ -77,7 +76,7 @@ where
         &self,
         _db: &dyn Database,
         _executor: crate::DatabaseKeyIndex,
-        _output_key: Option<crate::Id>,
+        _output_key: crate::Id,
     ) {
         panic!("tracked field ingredients have no outputs")
     }
@@ -86,7 +85,7 @@ where
         &self,
         _db: &dyn Database,
         _executor: crate::DatabaseKeyIndex,
-        _stale_output_key: Option<crate::Id>,
+        _stale_output_key: crate::Id,
     ) {
         panic!("tracked field ingredients have no outputs")
     }

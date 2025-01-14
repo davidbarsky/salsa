@@ -228,7 +228,7 @@ impl<T: Slot> Page<T> {
 
     pub(crate) fn allocate<V>(&self, page: PageIndex, value: V) -> Result<Id, V>
     where
-        V: FnOnce() -> T,
+        V: FnOnce(Id) -> T,
     {
         let guard = self.allocation_lock.lock();
         let index = self.allocated.load(Ordering::Acquire);
@@ -237,14 +237,15 @@ impl<T: Slot> Page<T> {
         }
 
         // Initialize entry `index`
+        let id = make_id(page, SlotIndex::new(index));
         let data = &self.data[index];
-        unsafe { (*data.get()).write(value()) };
+        unsafe { (*data.get()).write(value(id)) };
 
         // Update the length (this must be done after initialization!)
         self.allocated.store(index + 1, Ordering::Release);
         drop(guard);
 
-        Ok(make_id(page, SlotIndex::new(index)))
+        Ok(id)
     }
 }
 
@@ -293,7 +294,7 @@ impl dyn TablePage {
 fn make_id(page: PageIndex, slot: SlotIndex) -> Id {
     let page = page.0 as u32;
     let slot = slot.0 as u32;
-    Id::from_u32(page << PAGE_LEN_BITS | slot)
+    Id::from_u32((page << PAGE_LEN_BITS) | slot)
 }
 
 fn split_id(id: Id) -> (PageIndex, SlotIndex) {

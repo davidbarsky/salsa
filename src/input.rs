@@ -1,4 +1,8 @@
-use std::{any::Any, fmt, ops::DerefMut};
+use std::{
+    any::{Any, TypeId},
+    fmt,
+    ops::DerefMut,
+};
 
 pub mod input_field;
 pub mod setter;
@@ -13,7 +17,7 @@ use crate::{
     function::VerifyResult,
     id::{AsId, FromId},
     ingredient::{fmt_index, Ingredient},
-    key::{DatabaseKeyIndex, DependencyIndex},
+    key::{DatabaseKeyIndex, InputDependencyIndex},
     plumbing::{Jar, JarAux, Stamp},
     table::{memo::MemoTable, sync::SyncTable, Slot, Table},
     zalsa::{IngredientIndex, Zalsa},
@@ -61,6 +65,10 @@ impl<C: Configuration> Jar for JarImpl<C> {
                 Box::new(<FieldIngredientImpl<C>>::new(struct_index, field_index)) as _
             }))
             .collect()
+    }
+
+    fn salsa_struct_type_id(&self) -> Option<std::any::TypeId> {
+        Some(TypeId::of::<<C as Configuration>::Struct>())
     }
 }
 
@@ -110,7 +118,7 @@ impl<C: Configuration> IngredientImpl<C> {
             None
         };
 
-        let id = zalsa_local.allocate(zalsa.table(), self.ingredient_index, || Value::<C> {
+        let id = zalsa_local.allocate(zalsa.table(), self.ingredient_index, |_| Value::<C> {
             fields,
             stamps,
             memos: Default::default(),
@@ -184,10 +192,7 @@ impl<C: Configuration> IngredientImpl<C> {
         let value = Self::data(zalsa, id);
         let stamp = &value.stamps[field_index];
         zalsa_local.report_tracked_read(
-            DependencyIndex {
-                ingredient_index: field_ingredient_index,
-                key_index: Some(id),
-            },
+            InputDependencyIndex::new(field_ingredient_index, id),
             stamp.durability,
             stamp.changed_at,
             InputAccumulatedValues::Empty,
@@ -214,7 +219,7 @@ impl<C: Configuration> Ingredient for IngredientImpl<C> {
     fn maybe_changed_after(
         &self,
         _db: &dyn Database,
-        _input: Option<Id>,
+        _input: Id,
         _revision: Revision,
     ) -> VerifyResult {
         // Input ingredients are just a counter, they store no data, they are immortal.
@@ -238,7 +243,7 @@ impl<C: Configuration> Ingredient for IngredientImpl<C> {
         &self,
         _db: &dyn Database,
         executor: DatabaseKeyIndex,
-        output_key: Option<Id>,
+        output_key: Id,
     ) {
         unreachable!(
             "mark_validated_output({:?}, {:?}): input cannot be the output of a tracked function",
@@ -250,7 +255,7 @@ impl<C: Configuration> Ingredient for IngredientImpl<C> {
         &self,
         _db: &dyn Database,
         executor: DatabaseKeyIndex,
-        stale_output_key: Option<Id>,
+        stale_output_key: Id,
     ) {
         unreachable!(
             "remove_stale_output({:?}, {:?}): input cannot be the output of a tracked function",
