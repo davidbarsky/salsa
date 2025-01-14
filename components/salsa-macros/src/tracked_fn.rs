@@ -138,7 +138,7 @@ impl Macro {
                 input_ids: [#(#input_ids),*],
                 input_tys: [#(#input_tys),*],
                 output_ty: #output_ty,
-                inner_fn: #inner_fn,
+                inner_fn: { #inner_fn },
                 cycle_recovery_fn: #cycle_recovery_fn,
                 cycle_recovery_initial: #cycle_recovery_initial,
                 cycle_recovery_strategy: #cycle_recovery_strategy,
