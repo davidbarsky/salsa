@@ -61,8 +61,11 @@ enum Input {
     /// maximum of the given inputs, panicking on cycles
     MaxPanic(Inputs),
 
-    /// value of the given input, plus one
+    /// value of the given input, plus one; propagates error values
     Successor(Box<Input>),
+
+    /// successor, converts error values to zero
+    SuccessorOrZero(Box<Input>),
 }
 
 impl Input {
@@ -80,6 +83,10 @@ impl Input {
             Self::Successor(input) => match input.eval(db) {
                 Value::N(num) => Value::N(num + 1),
                 other => other,
+            },
+            Self::SuccessorOrZero(input) => match input.eval(db) {
+                Value::N(num) => Value::N(num + 1),
+                _ => Value::N(0),
             },
         }
     }
@@ -203,6 +210,7 @@ fn value(num: u8) -> Input {
 // - `uXX` for `UntrackedRead(XX)`
 // - `vXX` for `Value(XX)`
 // - `sY` for `Successor(Y)`
+// - `zY` for `SuccessorOrZero(Y)`
 //
 // We always enter from the top left node in the diagram.
 
@@ -415,6 +423,29 @@ fn two_fallback_count() {
     b_in.set_inputs(&mut db).to(vec![value(20), c]);
     c_in.set_inputs(&mut db)
         .to(vec![Input::Successor(Box::new(b))]);
+
+    a.assert_count(&db);
+}
+
+/// a:Xp(b) -> b:Xi(v20,c) -> c:Xp(zb)
+///            ^                     |
+///            +---------------------+
+///
+/// Two-query cycle, falls back but fallback does not converge.
+#[test]
+#[should_panic(expected = "fallback did not converge")]
+fn two_fallback_diverge() {
+    let mut db = DbImpl::new();
+    let a_in = Inputs::new(&db, vec![]);
+    let b_in = Inputs::new(&db, vec![]);
+    let c_in = Inputs::new(&db, vec![]);
+    let a = Input::MaxPanic(a_in);
+    let b = Input::MaxIterate(b_in);
+    let c = Input::MaxPanic(c_in);
+    a_in.set_inputs(&mut db).to(vec![b.clone()]);
+    b_in.set_inputs(&mut db).to(vec![value(20), c.clone()]);
+    c_in.set_inputs(&mut db)
+        .to(vec![Input::SuccessorOrZero(Box::new(b))]);
 
     a.assert_count(&db);
 }
