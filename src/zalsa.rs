@@ -4,15 +4,15 @@ use rustc_hash::FxHashMap;
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
 use std::marker::PhantomData;
-use std::thread::ThreadId;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::cycle::CycleRecoveryStrategy;
-use crate::hash::FxDashMap;
+use crate::hash::{FxDashMap, FxDashSet};
 use crate::ingredient::{Ingredient, Jar};
 use crate::nonce::{Nonce, NonceGenerator};
 use crate::runtime::{Runtime, WaitResult};
 use crate::table::memo::MemoTableWithTypes;
-use crate::table::sync::SyncTable;
+use crate::table::sync::{SyncTable, ThreadId};
 use crate::table::Table;
 use crate::views::Views;
 use crate::zalsa_local::ZalsaLocal;
@@ -152,6 +152,12 @@ pub struct Zalsa {
     /// The runtime for this particular salsa database handle.
     /// Each handle gets its own runtime, but the runtimes have shared state between them.
     runtime: Runtime,
+
+    next_thread_id: AtomicUsize,
+    /// To allow `ThreadId`s to get reused, we keep track of the currently active threads,
+    /// and keep rotating until we find a free thread ID. There shouldn't be many active
+    /// threads at once so this should be quick.
+    active_threads: FxDashSet<ThreadId>,
 }
 
 impl Zalsa {
@@ -165,6 +171,8 @@ impl Zalsa {
             ingredients_requiring_reset: AppendOnlyVec::new(),
             runtime: Runtime::default(),
             memo_ingredient_indices: Default::default(),
+            next_thread_id: AtomicUsize::new(1),
+            active_threads: Default::default(),
         }
     }
 
@@ -179,6 +187,34 @@ impl Zalsa {
     /// Returns the [`Table`][] used to store the value of salsa structs
     pub(crate) fn table(&self) -> &Table {
         self.runtime.table()
+    }
+
+    pub(crate) fn next_thread_id(&self) -> ThreadId {
+        let mut tries_count = 0;
+        loop {
+            let thread_id = self.next_thread_id.fetch_add(1, Ordering::SeqCst);
+            if thread_id == 0 {
+                continue;
+            }
+            if thread_id > ThreadId::MAX as usize {
+                // This may race with another thread, but that just mean we'll check more IDs.
+                self.next_thread_id.store(1, Ordering::SeqCst);
+                continue;
+            }
+            if tries_count == ThreadId::MAX {
+                // Unlikely, but to prevent hangs detect this.
+                panic!("no free thread IDs");
+            }
+            tries_count += 1;
+            let thread_id = ThreadId::from_usize(thread_id);
+            if self.active_threads.insert(thread_id) {
+                break thread_id;
+            }
+        }
+    }
+
+    pub(crate) fn free_thread_id(&self, thread_id: ThreadId) {
+        self.active_threads.remove(&thread_id);
     }
 
     /// Returns the [`MemoTable`][] for the salsa struct with the given id

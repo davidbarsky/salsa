@@ -563,13 +563,17 @@ where
     /// unspecified results (but not UB). See [`InternedIngredient::delete_index`] for more
     /// discussion and important considerations.
     pub(crate) fn delete_entity(&self, db: &dyn crate::Database, id: Id) {
+        let (zalsa, zalsa_local) = db.zalsas();
+
         db.salsa_event(&|| {
-            Event::new(crate::EventKind::DidDiscard {
-                key: self.database_key_index(id),
-            })
+            Event::new(
+                zalsa_local,
+                crate::EventKind::DidDiscard {
+                    key: self.database_key_index(id),
+                },
+            )
         });
 
-        let zalsa = db.zalsa();
         let current_revision = zalsa.current_revision();
         let data = Self::data_raw(zalsa.table(), id);
 
@@ -631,7 +635,7 @@ where
                 key_index: id,
             };
 
-            db.salsa_event(&|| Event::new(EventKind::DidDiscard { key: executor }));
+            db.salsa_event(&|| Event::new(zalsa_local, EventKind::DidDiscard { key: executor }));
 
             for stale_output in memo.origin().outputs() {
                 stale_output.remove_stale_output(db, executor);

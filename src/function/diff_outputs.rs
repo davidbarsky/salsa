@@ -46,10 +46,13 @@ where
         let db = db.as_dyn_database();
 
         db.salsa_event(&|| {
-            Event::new(EventKind::WillDiscardStaleOutput {
-                execute_key: key,
-                output_key: output,
-            })
+            Event::new(
+                db.zalsa_local(),
+                EventKind::WillDiscardStaleOutput {
+                    execute_key: key,
+                    output_key: output,
+                },
+            )
         });
 
         output.remove_stale_output(db, key);

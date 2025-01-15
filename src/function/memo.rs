@@ -157,9 +157,12 @@ impl<V> Memo<V> {
         accumulated: InputAccumulatedValues,
     ) {
         db.salsa_event(&|| {
-            Event::new(EventKind::DidValidateMemoizedValue {
-                database_key: database_key_index,
-            })
+            Event::new(
+                db.zalsa_local(),
+                EventKind::DidValidateMemoizedValue {
+                    database_key: database_key_index,
+                },
+            )
         });
 
         self.verified_at.store(revision_now);

@@ -1,5 +1,5 @@
-use std::thread::ThreadId;
-
+use crate::plumbing::ZalsaLocal;
+use crate::table::sync::ThreadId;
 use crate::{
     key::DatabaseKeyIndex,
     key::{InputDependencyIndex, OutputDependencyIndex},
@@ -18,9 +18,9 @@ pub struct Event {
 }
 
 impl Event {
-    pub fn new(kind: EventKind) -> Self {
+    pub fn new(zalsa_local: &ZalsaLocal, kind: EventKind) -> Self {
         Self {
-            thread_id: std::thread::current().id(),
+            thread_id: zalsa_local.thread_id(),
             kind,
         }
     }

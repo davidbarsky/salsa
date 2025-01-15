@@ -7,11 +7,12 @@ use crate::active_query::ActiveQuery;
 use crate::durability::Durability;
 use crate::key::{DatabaseKeyIndex, InputDependencyIndex, OutputDependencyIndex};
 use crate::runtime::StampedValue;
+use crate::table::sync::ThreadId;
 use crate::table::PageIndex;
 use crate::table::Slot;
 use crate::table::Table;
 use crate::tracked_struct::{Disambiguator, Identity, IdentityHash, IdentityMap};
-use crate::zalsa::IngredientIndex;
+use crate::zalsa::{IngredientIndex, Zalsa};
 use crate::Accumulator;
 use crate::Cancelled;
 use crate::Cycle;
@@ -41,13 +42,16 @@ pub struct ZalsaLocal {
     /// Stores the most recent page for a given ingredient.
     /// This is thread-local to avoid contention.
     most_recent_pages: RefCell<FxHashMap<IngredientIndex, PageIndex>>,
+
+    thread_id: ThreadId,
 }
 
 impl ZalsaLocal {
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(zalsa: &Zalsa) -> Self {
         ZalsaLocal {
             query_stack: RefCell::new(vec![]),
             most_recent_pages: RefCell::new(FxHashMap::default()),
+            thread_id: zalsa.next_thread_id(),
         }
     }
 
@@ -289,8 +293,8 @@ impl ZalsaLocal {
     /// `salsa_event` is emitted when this method is called, so that should be
     /// used instead.
     pub(crate) fn unwind_if_revision_cancelled(&self, db: &dyn Database) {
-        db.salsa_event(&|| Event::new(EventKind::WillCheckCancellation));
-        let zalsa = db.zalsa();
+        let (zalsa, zalsa_local) = db.zalsas();
+        db.salsa_event(&|| Event::new(zalsa_local, EventKind::WillCheckCancellation));
         if zalsa.load_cancellation_flag() {
             self.unwind_cancelled(zalsa.current_revision());
         }
@@ -300,6 +304,10 @@ impl ZalsaLocal {
     pub(crate) fn unwind_cancelled(&self, current_revision: Revision) {
         self.report_untracked_read(current_revision);
         Cancelled::PendingWrite.throw();
+    }
+
+    pub(crate) fn thread_id(&self) -> ThreadId {
+        self.thread_id
     }
 }
 

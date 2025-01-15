@@ -48,13 +48,14 @@ struct Coordinate {
 
 impl<Db: Database> Default for Storage<Db> {
     fn default() -> Self {
+        let zalsa = Zalsa::new::<Db>();
         Self {
-            zalsa_impl: Arc::new(Zalsa::new::<Db>()),
+            zalsa_local: ZalsaLocal::new(&zalsa),
+            zalsa_impl: Arc::new(zalsa),
             coordinate: CoordinateDrop(Arc::new(Coordinate {
                 clones: Mutex::new(1),
                 cvar: Default::default(),
             })),
-            zalsa_local: ZalsaLocal::new(),
             phantom: PhantomData,
         }
     }
@@ -116,7 +117,7 @@ impl<Db: Database> Storage<Db> {
     fn cancel_others(&self, db: &Db) {
         self.zalsa_impl.set_cancellation_flag();
 
-        db.salsa_event(&|| Event::new(EventKind::DidSetCancellationFlag));
+        db.salsa_event(&|| Event::new(&self.zalsa_local, EventKind::DidSetCancellationFlag));
 
         let mut clones = self.coordinate.clones.lock();
         while *clones != 1 {
@@ -159,7 +160,7 @@ impl<Db: Database> Clone for Storage<Db> {
         Self {
             zalsa_impl: self.zalsa_impl.clone(),
             coordinate: CoordinateDrop(Arc::clone(&self.coordinate)),
-            zalsa_local: ZalsaLocal::new(),
+            zalsa_local: ZalsaLocal::new(&self.zalsa_impl),
             phantom: PhantomData,
         }
     }
@@ -179,5 +180,11 @@ impl Drop for CoordinateDrop {
     fn drop(&mut self) {
         *self.0.clones.lock() -= 1;
         self.0.cvar.notify_all();
+    }
+}
+
+impl<Db: Database> Drop for Storage<Db> {
+    fn drop(&mut self) {
+        self.zalsa_impl.free_thread_id(self.zalsa_local.thread_id());
     }
 }

@@ -25,16 +25,19 @@ where
         active_query: ActiveQueryGuard<'_>,
         opt_old_memo: Option<Arc<Memo<C::Output<'_>>>>,
     ) -> &'db Memo<C::Output<'db>> {
-        let zalsa = db.zalsa();
+        let (zalsa, zalsa_local) = db.zalsas();
         let revision_now = zalsa.current_revision();
         let database_key_index = active_query.database_key_index;
 
         tracing::info!("{:?}: executing query", database_key_index);
 
         db.salsa_event(&|| {
-            Event::new(EventKind::WillExecute {
-                database_key: database_key_index,
-            })
+            Event::new(
+                zalsa_local,
+                EventKind::WillExecute {
+                    database_key: database_key_index,
+                },
+            )
         });
 
         // If we already executed this query once, then use the tracked-struct ids from the
