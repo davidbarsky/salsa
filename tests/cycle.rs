@@ -16,9 +16,9 @@ enum Value {
 }
 
 impl Value {
-    fn into_value(&self) -> Option<u8> {
+    fn to_value(self) -> Option<u8> {
         if let Self::N(val) = self {
-            Some(*val)
+            Some(val)
         } else {
             None
         }
@@ -122,7 +122,7 @@ fn cycle_recover(
     _inputs: Inputs,
 ) -> CycleRecoveryAction<Value> {
     if value
-        .into_value()
+        .to_value()
         .is_some_and(|val| val <= MIN_VALUE || val >= MAX_VALUE)
     {
         CycleRecoveryAction::Fallback(Value::OutOfBounds)

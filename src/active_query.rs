@@ -1,3 +1,5 @@
+use std::ops::Not;
+
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::zalsa_local::{QueryEdges, QueryOrigin, QueryRevisions};
@@ -52,6 +54,10 @@ pub(crate) struct ActiveQuery {
     /// Stores the values accumulated to the given ingredient.
     /// The type of accumulated value is erased but known to the ingredient.
     pub(crate) accumulated: AccumulatedMap,
+    ///
+    /// [`InputAccumulatedValues::Empty`] if any input read during the query's execution
+    /// has any accumulated values.
+    pub(super) accumulated_inputs: InputAccumulatedValues,
 
     /// Provisional cycle results that this query depends on.
     pub(crate) cycle_heads: FxHashSet<DatabaseKeyIndex>,
@@ -68,6 +74,7 @@ impl ActiveQuery {
             disambiguator_map: Default::default(),
             tracked_struct_ids: Default::default(),
             accumulated: Default::default(),
+            accumulated_inputs: Default::default(),
             cycle_heads: Default::default(),
         }
     }
@@ -83,7 +90,7 @@ impl ActiveQuery {
         self.input_outputs.insert(QueryEdge::Input(input));
         self.durability = self.durability.min(durability);
         self.changed_at = self.changed_at.max(revision);
-        self.accumulated.add_input(accumulated);
+        self.accumulated_inputs |= accumulated;
         if let Some(cycle_heads) = cycle_heads {
             self.cycle_heads.extend(cycle_heads);
         }
@@ -118,13 +125,21 @@ impl ActiveQuery {
         } else {
             QueryOrigin::Derived(edges)
         };
-
+        let accumulated = self
+            .accumulated
+            .is_empty()
+            .not()
+            .then(|| Box::new(self.accumulated));
         QueryRevisions {
             changed_at: self.changed_at,
             origin,
             durability: self.durability,
             tracked_struct_ids: self.tracked_struct_ids,
-            accumulated: self.accumulated,
+            accumulated_inputs: match &accumulated {
+                Some(_) => InputAccumulatedValues::Any,
+                None => self.accumulated_inputs,
+            },
+            accumulated,
             cycle_heads: self.cycle_heads,
         }
     }

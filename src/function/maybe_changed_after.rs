@@ -154,15 +154,13 @@ where
             "{database_key_index:?}: shallow_verify_memo(memo = {memo:#?})",
             memo = memo.tracing_debug()
         );
-        if !allow_provisional {
-            if memo.may_be_provisional() {
-                tracing::debug!(
-                    "{database_key_index:?}: validate_provisional(memo = {memo:#?})",
-                    memo = memo.tracing_debug()
-                );
-                if !self.validate_provisional(db, zalsa, memo) {
-                    return false;
-                }
+        if !allow_provisional && memo.may_be_provisional() {
+            tracing::debug!(
+                "{database_key_index:?}: validate_provisional(memo = {memo:#?})",
+                memo = memo.tracing_debug()
+            );
+            if !self.validate_provisional(db, zalsa, memo) {
+                return false;
             }
         }
         let verified_at = memo.verified_at.load();

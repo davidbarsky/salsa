@@ -1,5 +1,4 @@
 use super::{memo::Memo, Configuration, IngredientImpl, VerifyResult};
-use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::{
     runtime::StampedValue, table::sync::ClaimResult, zalsa::ZalsaDatabase,
     zalsa_local::QueryRevisions, AsDynDatabase as _, Id,
@@ -28,7 +27,7 @@ where
             self.database_key_index(id).into(),
             durability,
             changed_at,
-            InputAccumulatedValues::from_map(&memo.revisions.accumulated),
+            memo.revisions.accumulated_inputs,
             memo.cycle_heads(),
         );
 
