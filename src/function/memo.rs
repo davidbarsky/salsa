@@ -66,7 +66,7 @@ impl<C: Configuration> IngredientImpl<C> {
     /// or has values assigned as output of another query, this has no effect.
     pub(super) fn evict_value_from_memo_for<'db>(&'db self, zalsa: &'db Zalsa, id: Id) {
         let old = zalsa.memo_table_for(id).map_memo::<Memo<C::Output<'_>>>(
-            self.memo_ingredient_index,
+            self.memo_ingredient_index(zalsa, id),
             |memo| {
                 match memo.revisions.origin {
                     QueryOrigin::Assigned(_)
