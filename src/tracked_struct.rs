@@ -6,7 +6,7 @@ use tracked_field::FieldIngredientImpl;
 use crate::{
     accumulator::accumulated_map::InputAccumulatedValues,
     cycle::CycleRecoveryStrategy,
-    ingredient::{fmt_index, Ingredient, Jar, JarAux, MaybeChangedAfter},
+    ingredient::{fmt_index, Ingredient, Jar, MaybeChangedAfter},
     key::{DatabaseKeyIndex, InputDependencyIndex},
     plumbing::ZalsaLocal,
     runtime::StampedValue,
