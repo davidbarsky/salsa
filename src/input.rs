@@ -231,6 +231,10 @@ impl<C: Configuration> Ingredient for IngredientImpl<C> {
         false
     }
 
+    fn wait_for(&self, _db: &dyn Database, _key_index: Id) -> bool {
+        false
+    }
+
     fn cycle_recovery_strategy(&self) -> CycleRecoveryStrategy {
         CycleRecoveryStrategy::Panic
     }

@@ -64,6 +64,10 @@ where
         false
     }
 
+    fn wait_for(&self, _db: &dyn Database, _key_index: Id) -> bool {
+        false
+    }
+
     fn origin(
         &self,
         _db: &dyn Database,

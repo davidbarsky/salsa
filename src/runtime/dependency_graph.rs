@@ -83,6 +83,7 @@ impl DependencyGraph {
 
         loop {
             if let Some(stack_and_result) = me.wait_results.remove(&from_id) {
+                eprintln!("thread {from_id:?} unblocked on {database_key:?} by {to_id:?}");
                 debug_assert!(!me.edges.contains_key(&from_id));
                 return stack_and_result;
             }

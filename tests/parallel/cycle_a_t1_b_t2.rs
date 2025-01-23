@@ -20,7 +20,7 @@ use crate::setup::{Knobs, KnobsDatabase};
 struct CycleValue(u32);
 
 const MIN: CycleValue = CycleValue(0);
-const MAX: CycleValue = CycleValue(22);
+const MAX: CycleValue = CycleValue(3);
 
 // Signal 1: T1 has entered `query_a`
 // Signal 2: T2 has entered `query_b`
@@ -58,22 +58,26 @@ fn initial(_db: &dyn KnobsDatabase) -> CycleValue {
     MIN
 }
 
-#[test]
+#[test_log::test]
 fn the_test() {
     std::thread::scope(|scope| {
         let db_t1 = Knobs::default();
         let db_t2 = db_t1.clone();
 
         // Thread 1:
-        scope.spawn(move || {
+        let handle1 = scope.spawn(move || {
             let r = query_a(&db_t1);
+            eprintln!("first thread checking results");
             assert_eq!(r, MAX);
         });
+        eprintln!("first thread is {:?}", handle1.thread().id());
 
         // Thread 2:
-        scope.spawn(move || {
+        let handle2 = scope.spawn(move || {
             let r = query_b(&db_t2);
+            eprintln!("second thread checking results");
             assert_eq!(r, MAX);
         });
+        eprintln!("second thread is {:?}", handle2.thread().id());
     });
 }

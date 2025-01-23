@@ -7,6 +7,7 @@ use crate::{
     key::DatabaseKeyIndex,
     plumbing::JarAux,
     salsa_struct::SalsaStructInDb,
+    table::sync::ClaimResult,
     zalsa::{IngredientIndex, MemoIngredientIndex, Zalsa},
     zalsa_local::QueryOrigin,
     Database, Id, Revision,
@@ -204,6 +205,22 @@ where
     fn is_verified_final<'db>(&'db self, db: &'db dyn Database, input: Id) -> bool {
         self.get_memo_from_table_for(db.zalsa(), input)
             .is_some_and(|memo| !memo.may_be_provisional())
+    }
+
+    fn wait_for(&self, db: &dyn Database, key_index: Id) -> bool {
+        let (zalsa, zalsa_local) = db.zalsas();
+        match zalsa.sync_table_for(key_index).claim(
+            db,
+            zalsa_local,
+            self.database_key_index(key_index),
+            self.memo_ingredient_index,
+        ) {
+            ClaimResult::Retry => true,
+            ClaimResult::Claimed(_) => {
+                unreachable!("should never have a provisional memo with unclaimed cycle head");
+            }
+            ClaimResult::Cycle => false,
+        }
     }
 
     fn cycle_recovery_strategy(&self) -> CycleRecoveryStrategy {

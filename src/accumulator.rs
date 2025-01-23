@@ -114,6 +114,10 @@ impl<A: Accumulator> Ingredient for IngredientImpl<A> {
         false
     }
 
+    fn wait_for(&self, _db: &dyn Database, _key_index: Id) -> bool {
+        false
+    }
+
     fn cycle_recovery_strategy(&self) -> CycleRecoveryStrategy {
         CycleRecoveryStrategy::Panic
     }

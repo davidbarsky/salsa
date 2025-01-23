@@ -40,8 +40,41 @@ where
         db: &'db C::DbView,
         id: Id,
     ) -> &'db Memo<C::Output<'db>> {
-        loop {
+        'outer: loop {
             if let Some(memo) = self.fetch_hot(db, id).or_else(|| self.fetch_cold(db, id)) {
+                // If we get back a provisional cycle memo, and it's provisional on any cycle heads
+                // that are claimed by a different thread, we can't propagate the provisional memo
+                // any further (it could escape outside the cycle); we need to block on the other
+                // thread completing fixpoint iteration of the cycle, and then we can re-query for
+                // our no-longer-provisional memo.
+                if memo.may_be_provisional() {
+                    let database_key_index = self.database_key_index(id);
+                    let Some(cycle_heads) = memo.cycle_heads() else {
+                        unreachable!(
+                            "A just-verified memo must have up-to-date provisional status."
+                        );
+                    };
+                    for head in cycle_heads {
+                        if *head == database_key_index {
+                            continue;
+                        }
+                        let ingredient = db.zalsa().lookup_ingredient(head.ingredient_index);
+                        if ingredient.is_verified_final(db.as_dyn_database(), head.key_index) {
+                            continue;
+                        }
+                        if ingredient.wait_for(db.as_dyn_database(), head.key_index) {
+                            // There's a new memo available for the cycle head; fetch our own
+                            // updated memo and see if it's still provisional or if the cycle
+                            // has resolved.
+                            continue 'outer;
+                        } else {
+                            // We hit a cycle blocking on the cycle head; this means it's in
+                            // our own active query stack and we are responsible to resolve the
+                            // cycle, so go ahead and return the provisional memo.
+                            return memo;
+                        }
+                    }
+                }
                 return memo;
             }
         }
