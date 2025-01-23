@@ -87,8 +87,6 @@ where
                     "{database_key_index:?}: execute: \
                     I am a cycle head, comparing last provisional value with new value"
                 );
-                dbg!(&new_value);
-                dbg!(last_provisional_value);
                 // If the new result is equal to the last provisional result, the cycle has
                 // converged and we are done.
                 if !C::values_equal(&new_value, last_provisional_value) {
@@ -145,11 +143,9 @@ where
                     "{database_key_index:?}: execute: fixpoint iteration has a final value"
                 );
                 revisions.cycle_heads.remove(&database_key_index);
-                dbg!(&revisions.cycle_heads);
             }
 
             tracing::debug!("{database_key_index:?}: execute: result.revisions = {revisions:#?}");
-            dbg!(&new_value);
 
             // If the new value is equal to the old one, then it didn't
             // really change, even if some of its inputs have. So we can

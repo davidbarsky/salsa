@@ -109,18 +109,13 @@ where
         ) {
             ClaimResult::Retry => return None,
             ClaimResult::Cycle => {
-                dbg!("hit cycle for", database_key_index);
                 // check if there's a provisional value for this query
                 let memo_guard = self.get_memo_from_table_for(zalsa, id);
                 if let Some(memo) = &memo_guard {
-                    dbg!("found provisional value, shallow verifying it");
-                    dbg!(memo.tracing_debug());
                     if memo.value.is_some()
                         && memo.revisions.cycle_heads.contains(&database_key_index)
                         && self.shallow_verify_memo(db, zalsa, database_key_index, memo, true)
                     {
-                        dbg!("verified provisional value, returning it");
-                        dbg!(&memo.value);
                         // Unsafety invariant: memo is present in memo_map.
                         unsafe {
                             return Some(self.extend_memo_lifetime(memo));
@@ -128,7 +123,6 @@ where
                     }
                 }
                 // no provisional value; create/insert/return initial provisional value
-                dbg!("no provisional value found, checking for initial value");
                 return self
                     .initial_value(db, database_key_index.key_index)
                     .map(|initial_value| {

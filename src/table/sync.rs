@@ -50,11 +50,8 @@ impl SyncTable {
 
         util::ensure_vec_len(&mut syncs, memo_ingredient_index.as_usize() + 1);
 
-        eprintln!("SyncTable::claim {database_key_index:?}, thread {thread_id:?}");
-
         match &syncs[memo_ingredient_index.as_usize()] {
             None => {
-                eprintln!("not claimed, claiming");
                 syncs[memo_ingredient_index.as_usize()] = Some(SyncState {
                     id: thread_id,
                     anyone_waiting: AtomicBool::new(false),
@@ -70,7 +67,6 @@ impl SyncTable {
                 id: other_id,
                 anyone_waiting,
             }) => {
-                eprintln!("already claimed");
                 // NB: `Ordering::Relaxed` is sufficient here,
                 // as there are no loads that are "gated" on this
                 // value. Everything that is written is also protected
@@ -100,8 +96,6 @@ pub(crate) struct ClaimGuard<'me> {
 impl ClaimGuard<'_> {
     fn remove_from_map_and_unblock_queries(&self, wait_result: WaitResult) {
         let mut syncs = self.sync_table.syncs.write();
-
-        eprintln!("dropping claim on {:?}", self.database_key_index);
 
         let SyncState { anyone_waiting, .. } =
             syncs[self.memo_ingredient_index.as_usize()].take().unwrap();

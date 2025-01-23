@@ -160,7 +160,7 @@ where
 /// Query minimum value of inputs, with cycle recovery.
 #[salsa::tracked(cycle_fn=cycle_recover, cycle_initial=min_initial)]
 fn min_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
-    dbg!(fold_values(inputs.values(db), u8::min))
+    fold_values(inputs.values(db), u8::min)
 }
 
 fn min_initial(_db: &dyn Db, _inputs: Inputs) -> Value {
@@ -170,7 +170,7 @@ fn min_initial(_db: &dyn Db, _inputs: Inputs) -> Value {
 /// Query maximum value of inputs, with cycle recovery.
 #[salsa::tracked(cycle_fn=cycle_recover, cycle_initial=max_initial)]
 fn max_iterate<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
-    dbg!(fold_values(inputs.values(db), u8::max))
+    fold_values(inputs.values(db), u8::max)
 }
 
 fn max_initial(_db: &dyn Db, _inputs: Inputs) -> Value {
@@ -180,13 +180,13 @@ fn max_initial(_db: &dyn Db, _inputs: Inputs) -> Value {
 /// Query minimum value of inputs, without cycle recovery.
 #[salsa::tracked]
 fn min_panic<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
-    dbg!(fold_values(inputs.values(db), u8::min))
+    fold_values(inputs.values(db), u8::min)
 }
 
 /// Query maximum value of inputs, without cycle recovery.
 #[salsa::tracked]
 fn max_panic<'db>(db: &'db dyn Db, inputs: Inputs) -> Value {
-    dbg!(fold_values(inputs.values(db), u8::max))
+    fold_values(inputs.values(db), u8::max)
 }
 
 fn untracked(num: u8) -> Input {

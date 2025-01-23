@@ -65,19 +65,15 @@ fn the_test() {
         let db_t2 = db_t1.clone();
 
         // Thread 1:
-        let handle1 = scope.spawn(move || {
+        scope.spawn(move || {
             let r = query_a(&db_t1);
-            eprintln!("first thread checking results");
             assert_eq!(r, MAX);
         });
-        eprintln!("first thread is {:?}", handle1.thread().id());
 
         // Thread 2:
-        let handle2 = scope.spawn(move || {
+        scope.spawn(move || {
             let r = query_b(&db_t2);
-            eprintln!("second thread checking results");
             assert_eq!(r, MAX);
         });
-        eprintln!("second thread is {:?}", handle2.thread().id());
     });
 }

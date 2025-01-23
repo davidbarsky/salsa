@@ -172,10 +172,7 @@ impl Runtime {
         let mut dg = self.dependency_graph.lock();
         let thread_id = std::thread::current().id();
 
-        eprintln!("Runtime::block_on {database_key:?}, I am {thread_id:?}, other id {other_id:?}");
-
         if dg.depends_on(other_id, thread_id) {
-            eprintln!("thread dependency cycle");
             return BlockResult::Cycle;
         }
 
