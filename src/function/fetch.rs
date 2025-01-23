@@ -154,10 +154,10 @@ where
         };
 
         // Now that we've claimed the item, check again to see if there's a "hot" value.
+        let active_query = zalsa_local.push_query(database_key_index);
         let opt_old_memo = self.get_memo_from_table_for(zalsa, id);
         if let Some(old_memo) = &opt_old_memo {
             if old_memo.value.is_some() {
-                let active_query = zalsa_local.push_query(database_key_index);
                 if let VerifyResult::Unchanged(cycle_heads) =
                     self.deep_verify_memo(db, old_memo, &active_query)
                 {
@@ -170,7 +170,7 @@ where
             }
         }
 
-        let memo = self.execute(db, database_key_index, opt_old_memo);
+        let memo = self.execute(db, active_query, opt_old_memo);
 
         Some(memo)
     }

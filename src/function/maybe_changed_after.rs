@@ -130,7 +130,7 @@ where
         // backdated. In that case, although we will have computed a new memo,
         // the value has not logically changed.
         if old_memo.value.is_some() {
-            let memo = self.execute(db, database_key_index, Some(old_memo));
+            let memo = self.execute(db, active_query, Some(old_memo));
             let changed_at = memo.revisions.changed_at;
             return Some(VerifyResult::changed_if(changed_at > revision));
         }

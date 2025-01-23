@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    cycle::MAX_ITERATIONS, zalsa::ZalsaDatabase, Database, DatabaseKeyIndex, Event, EventKind,
+    cycle::{CycleRecoveryStrategy, MAX_ITERATIONS},
+    zalsa::ZalsaDatabase,
+    zalsa_local::ActiveQueryGuard,
+    Database, Event, EventKind,
 };
 
 use super::{memo::Memo, Configuration, IngredientImpl};
@@ -22,11 +25,12 @@ where
     pub(super) fn execute<'db>(
         &'db self,
         db: &'db C::DbView,
-        database_key_index: DatabaseKeyIndex,
+        mut active_query: ActiveQueryGuard<'db>,
         opt_old_memo: Option<Arc<Memo<C::Output<'_>>>>,
     ) -> &'db Memo<C::Output<'db>> {
         let (zalsa, zalsa_local) = db.zalsas();
         let revision_now = zalsa.current_revision();
+        let database_key_index = active_query.database_key_index;
         let id = database_key_index.key_index;
 
         tracing::info!("{:?}: executing query", database_key_index);
@@ -46,8 +50,6 @@ where
         let mut opt_last_provisional: Option<&Memo<<C as Configuration>::Output<'db>>> = None;
 
         loop {
-            let active_query = zalsa_local.push_query(database_key_index);
-
             // If we already executed this query once, then use the tracked-struct ids from the
             // previous execution as the starting point for the new one.
             if let Some(old_memo) = &opt_old_memo {
@@ -60,7 +62,9 @@ where
             let mut revisions = active_query.pop();
 
             // Did the new result we got depend on our own provisional value, in a cycle?
-            if revisions.cycle_heads.contains(&database_key_index) {
+            if C::CYCLE_STRATEGY == CycleRecoveryStrategy::Fixpoint
+                && revisions.cycle_heads.contains(&database_key_index)
+            {
                 let opt_owned_last_provisional;
                 let last_provisional_value = if let Some(last_provisional) = opt_last_provisional {
                     // We have a last provisional value from our previous time around the loop.
@@ -136,6 +140,9 @@ where
                         id,
                         Memo::new(Some(new_value), revision_now, revisions),
                     ));
+
+                    active_query = zalsa_local.push_query(database_key_index);
+
                     continue;
                 }
                 tracing::debug!(
