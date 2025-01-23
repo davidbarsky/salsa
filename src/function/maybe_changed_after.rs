@@ -230,9 +230,8 @@ where
             return VerifyResult::Changed;
         }
 
+        let mut cycle_heads = FxHashSet::default();
         loop {
-            let mut cycle_heads = FxHashSet::default();
-
             match &old_memo.revisions.origin {
                 QueryOrigin::Assigned(_) => {
                     // If the value was assigneed by another query,
@@ -313,6 +312,7 @@ where
                 );
             }
             if in_heads {
+                cycle_heads.clear();
                 continue;
             }
             return VerifyResult::Unchanged(cycle_heads);
