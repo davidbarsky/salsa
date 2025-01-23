@@ -125,10 +125,9 @@ where
                             fell_back = true;
                         }
                     }
-                    iteration_count = iteration_count.checked_add(1).expect(
-                        "fixpoint iteration of {database_key_index:#?} should \
-                                converge before u32::MAX iterations",
-                    );
+                    iteration_count = iteration_count
+                        .checked_add(1)
+                        .expect("fixpoint iteration should converge before u32::MAX iterations");
                     if iteration_count > MAX_ITERATIONS {
                         panic!("{database_key_index:?}: execute: too many cycle iterations");
                     }
