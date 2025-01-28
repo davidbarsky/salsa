@@ -125,7 +125,7 @@ where
             old_memo = old_memo.tracing_debug()
         );
 
-        // Check if the inputs are still valid and we can just compare `changed_at`.
+        // Check if the inputs are still valid. We can just compare `changed_at`.
         let active_query = zalsa_local.push_query(database_key_index);
         if let VerifyResult::Unchanged(_, cycle_heads) =
             self.deep_verify_memo(db, &old_memo, &active_query)
@@ -230,7 +230,7 @@ where
         true
     }
 
-    /// VerifyResult::Unchanged if the memo's value and `changed_at` time is up to date in the
+    /// VerifyResult::Unchanged if the memo's value and `changed_at` time is up-to-date in the
     /// current revision. When this returns Unchanged with no cycle heads, it also updates the
     /// memo's `verified_at` field if needed to make future calls cheaper.
     ///

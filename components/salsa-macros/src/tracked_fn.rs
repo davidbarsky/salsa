@@ -31,6 +31,8 @@ impl crate::options::AllowedOptions for TrackedFn {
 
     const NO_DEBUG: bool = false;
 
+    const NO_LIFETIME: bool = false;
+
     const NO_CLONE: bool = false;
 
     const SINGLETON: bool = false;
@@ -46,6 +48,8 @@ impl crate::options::AllowedOptions for TrackedFn {
     const LRU: bool = true;
 
     const CONSTRUCTOR_NAME: bool = false;
+
+    const ID: bool = false;
 }
 
 struct Macro {
@@ -174,6 +178,7 @@ impl Macro {
 
         Ok(ValidFn { db_ident, db_path })
     }
+
     fn cycle_recovery(&self) -> syn::Result<(TokenStream, TokenStream, TokenStream)> {
         // TODO should we ask the user to specify a struct that impls a trait with two methods,
         // rather than asking for two methods separately?

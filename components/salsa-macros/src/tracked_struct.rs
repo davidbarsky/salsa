@@ -37,6 +37,8 @@ impl crate::options::AllowedOptions for TrackedStruct {
 
     const NO_DEBUG: bool = true;
 
+    const NO_LIFETIME: bool = false;
+
     const NO_CLONE: bool = false;
 
     const SINGLETON: bool = true;
@@ -52,6 +54,8 @@ impl crate::options::AllowedOptions for TrackedStruct {
     const LRU: bool = false;
 
     const CONSTRUCTOR_NAME: bool = true;
+
+    const ID: bool = false;
 }
 
 impl SalsaStructAllowedOptions for TrackedStruct {
@@ -60,6 +64,8 @@ impl SalsaStructAllowedOptions for TrackedStruct {
     const ALLOW_ID: bool = true;
 
     const HAS_LIFETIME: bool = true;
+
+    const ELIDABLE_LIFETIME: bool = false;
 
     const ALLOW_DEFAULT: bool = false;
 }
