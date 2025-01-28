@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use crossbeam::atomic::AtomicCell;
 
+use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::zalsa_local::QueryOrigin;
 use crate::{
     cycle::CycleRecoveryStrategy, key::DatabaseKeyIndex, zalsa::Zalsa, zalsa_local::QueryRevisions,
@@ -84,7 +85,7 @@ impl<C: Configuration> IngredientImpl<C> {
                             ref origin,
                             ref tracked_struct_ids,
                             ref accumulated,
-                            accumulated_inputs,
+                            ref accumulated_inputs,
                             ref cycle_heads,
                         } = &memo.revisions;
                         // Re-assemble the memo but with the value set to `None`
@@ -97,7 +98,7 @@ impl<C: Configuration> IngredientImpl<C> {
                                 origin: origin.clone(),
                                 tracked_struct_ids: tracked_struct_ids.clone(),
                                 accumulated: accumulated.clone(),
-                                accumulated_inputs,
+                                accumulated_inputs: AtomicCell::new(accumulated_inputs.load()),
                                 cycle_heads: cycle_heads.clone(),
                             },
                         ))
@@ -184,6 +185,7 @@ impl<V> Memo<V> {
         db: &dyn crate::Database,
         revision_now: Revision,
         database_key_index: DatabaseKeyIndex,
+        accumulated: InputAccumulatedValues,
     ) {
         db.salsa_event(&|| {
             Event::new(EventKind::DidValidateMemoizedValue {
@@ -192,6 +194,7 @@ impl<V> Memo<V> {
         });
 
         self.verified_at.store(revision_now);
+        self.revisions.accumulated_inputs.store(accumulated);
     }
 
     pub(super) fn mark_outputs_as_verified(

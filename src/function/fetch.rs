@@ -1,7 +1,8 @@
 use super::{memo::Memo, Configuration, IngredientImpl, VerifyResult};
 use crate::{
-    runtime::StampedValue, table::sync::ClaimResult, zalsa::ZalsaDatabase,
-    zalsa_local::QueryRevisions, AsDynDatabase as _, Id,
+    accumulator::accumulated_map::InputAccumulatedValues, runtime::StampedValue,
+    table::sync::ClaimResult, zalsa::ZalsaDatabase, zalsa_local::QueryRevisions,
+    AsDynDatabase as _, Id,
 };
 
 impl<C> IngredientImpl<C>
@@ -27,7 +28,10 @@ where
             self.database_key_index(id).into(),
             durability,
             changed_at,
-            memo.revisions.accumulated_inputs,
+            match &memo.revisions.accumulated {
+                Some(_) => InputAccumulatedValues::Any,
+                None => memo.revisions.accumulated_inputs.load(),
+            },
             memo.cycle_heads(),
         );
 
@@ -158,7 +162,7 @@ where
         let opt_old_memo = self.get_memo_from_table_for(zalsa, id);
         if let Some(old_memo) = &opt_old_memo {
             if old_memo.value.is_some() {
-                if let VerifyResult::Unchanged(cycle_heads) =
+                if let VerifyResult::Unchanged(_, cycle_heads) =
                     self.deep_verify_memo(db, old_memo, &active_query)
                 {
                     if cycle_heads.is_empty() {

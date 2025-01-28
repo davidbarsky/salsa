@@ -1,4 +1,5 @@
 use crate::{
+    accumulator::accumulated_map::InputAccumulatedValues,
     cycle::CycleRecoveryStrategy,
     key::DatabaseKeyIndex,
     table::sync::ClaimResult,
@@ -17,14 +18,17 @@ pub enum VerifyResult {
 
     /// Memo remains valid.
     ///
+    /// The first inner value tracks whether the memo or any of its dependencies have an
+    /// accumulated value.
+    ///
     /// Database keys in the hashset represent cycle heads encountered in validation; don't mark
     /// memos verified until we've iterated the full cycle to ensure no inputs changed.
-    Unchanged(FxHashSet<DatabaseKeyIndex>),
+    Unchanged(InputAccumulatedValues, FxHashSet<DatabaseKeyIndex>),
 }
 
 impl VerifyResult {
-    pub(crate) fn changed_if(condition: bool) -> Self {
-        if condition {
+    pub(crate) fn changed_if(changed: bool) -> Self {
+        if changed {
             Self::Changed
         } else {
             Self::unchanged()
@@ -32,7 +36,7 @@ impl VerifyResult {
     }
 
     pub(crate) fn unchanged() -> Self {
-        Self::Unchanged(FxHashSet::default())
+        Self::Unchanged(InputAccumulatedValues::Empty, FxHashSet::default())
     }
 }
 
@@ -58,7 +62,14 @@ where
             let memo_guard = self.get_memo_from_table_for(zalsa, id);
             if let Some(memo) = &memo_guard {
                 if self.shallow_verify_memo(db, zalsa, database_key_index, memo, false) {
-                    return VerifyResult::changed_if(memo.revisions.changed_at > revision);
+                    return if memo.revisions.changed_at > revision {
+                        VerifyResult::Changed
+                    } else {
+                        VerifyResult::Unchanged(
+                            memo.revisions.accumulated_inputs.load(),
+                            FxHashSet::default(),
+                        )
+                    };
                 }
                 drop(memo_guard); // release the arc-swap guard before cold path
                 if let Some(mcs) = self.maybe_changed_after_cold(db, id, revision) {
@@ -95,9 +106,10 @@ where
                      set cycle_fn/cycle_initial to fixpoint iterate"
                 ),
                 CycleRecoveryStrategy::Fixpoint => {
-                    return Some(VerifyResult::Unchanged(FxHashSet::from_iter([
-                        database_key_index,
-                    ])))
+                    return Some(VerifyResult::Unchanged(
+                        InputAccumulatedValues::Empty,
+                        FxHashSet::from_iter([database_key_index]),
+                    ))
                 }
             },
             ClaimResult::Claimed(guard) => guard,
@@ -115,13 +127,13 @@ where
 
         // Check if the inputs are still valid and we can just compare `changed_at`.
         let active_query = zalsa_local.push_query(database_key_index);
-        if let VerifyResult::Unchanged(cycle_heads) =
+        if let VerifyResult::Unchanged(_, cycle_heads) =
             self.deep_verify_memo(db, &old_memo, &active_query)
         {
             return Some(if old_memo.revisions.changed_at > revision {
                 VerifyResult::Changed
             } else {
-                VerifyResult::Unchanged(cycle_heads)
+                VerifyResult::Unchanged(old_memo.revisions.accumulated_inputs.load(), cycle_heads)
             });
         }
 
@@ -132,7 +144,18 @@ where
         if old_memo.value.is_some() {
             let memo = self.execute(db, active_query, Some(old_memo));
             let changed_at = memo.revisions.changed_at;
-            return Some(VerifyResult::changed_if(changed_at > revision));
+
+            return Some(if changed_at > revision {
+                VerifyResult::Changed
+            } else {
+                VerifyResult::Unchanged(
+                    match &memo.revisions.accumulated {
+                        Some(_) => InputAccumulatedValues::Any,
+                        None => memo.revisions.accumulated_inputs.load(),
+                    },
+                    FxHashSet::default(),
+                )
+            });
         }
 
         // Otherwise, nothing for it: have to consider the value to have changed.
@@ -174,7 +197,12 @@ where
         if memo.check_durability(zalsa) {
             // No input of the suitable durability has changed since last verified.
             let db = db.as_dyn_database();
-            memo.mark_as_verified(db, revision_now, database_key_index);
+            memo.mark_as_verified(
+                db,
+                revision_now,
+                database_key_index,
+                memo.revisions.accumulated_inputs.load(),
+            );
             memo.mark_outputs_as_verified(db, database_key_index);
             return true;
         }
@@ -224,7 +252,7 @@ where
         );
 
         if self.shallow_verify_memo(db, zalsa, database_key_index, old_memo, false) {
-            return VerifyResult::Unchanged(Default::default());
+            return VerifyResult::Unchanged(InputAccumulatedValues::Empty, Default::default());
         }
         if old_memo.may_be_provisional() {
             return VerifyResult::Changed;
@@ -232,7 +260,7 @@ where
 
         let mut cycle_heads = FxHashSet::default();
         loop {
-            match &old_memo.revisions.origin {
+            let inputs = match &old_memo.revisions.origin {
                 QueryOrigin::Assigned(_) => {
                     // If the value was assigneed by another query,
                     // and that query were up-to-date,
@@ -263,6 +291,7 @@ where
                     // valid, then some later input I1 might never have executed at all, so verifying
                     // it is still up to date is meaningless.
                     let last_verified_at = old_memo.verified_at.load();
+                    let mut inputs = InputAccumulatedValues::Empty;
                     for &edge in edges.input_outputs.iter() {
                         match edge {
                             QueryEdge::Input(dependency_index) => {
@@ -270,7 +299,10 @@ where
                                     .maybe_changed_after(db.as_dyn_database(), last_verified_at)
                                 {
                                     VerifyResult::Changed => return VerifyResult::Changed,
-                                    VerifyResult::Unchanged(cycles) => cycle_heads.extend(cycles),
+                                    VerifyResult::Unchanged(input_accumulated, cycles) => {
+                                        cycle_heads.extend(cycles);
+                                        inputs |= input_accumulated;
+                                    }
                                 }
                             }
                             QueryEdge::Output(dependency_index) => {
@@ -299,8 +331,9 @@ where
                             }
                         }
                     }
+                    inputs
                 }
-            }
+            };
 
             let in_heads = cycle_heads.remove(&database_key_index);
 
@@ -309,13 +342,14 @@ where
                     db.as_dyn_database(),
                     zalsa.current_revision(),
                     database_key_index,
+                    inputs,
                 );
             }
             if in_heads {
                 cycle_heads.clear();
                 continue;
             }
-            return VerifyResult::Unchanged(cycle_heads);
+            return VerifyResult::Unchanged(InputAccumulatedValues::Empty, cycle_heads);
         }
     }
 }

@@ -1,3 +1,4 @@
+use crossbeam::atomic::AtomicCell;
 use rustc_hash::{FxHashMap, FxHashSet};
 use tracing::debug;
 
@@ -316,7 +317,7 @@ pub(crate) struct QueryRevisions {
 
     /// [`InputAccumulatedValues::Empty`] if any input read during the query's execution
     /// has any direct or indirect accumulated values.
-    pub(super) accumulated_inputs: InputAccumulatedValues,
+    pub(super) accumulated_inputs: AtomicCell<InputAccumulatedValues>,
 
     /// This result was computed based on provisional values from
     /// these cycle heads. The "cycle head" is the query responsible
