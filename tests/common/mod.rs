@@ -2,7 +2,7 @@
 
 #![allow(dead_code)]
 
-use std::sync::{Arc, Mutex};
+use salsa::sync::{Arc, Mutex};
 
 use salsa::{Database, Storage};
 

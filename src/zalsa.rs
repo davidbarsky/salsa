@@ -3,11 +3,11 @@ use parking_lot::{Mutex, RwLock};
 use rustc_hash::FxHashMap;
 use std::any::{Any, TypeId};
 use std::marker::PhantomData;
-use std::thread::ThreadId;
 
 use crate::ingredient::{Ingredient, Jar, JarAux};
 use crate::nonce::{Nonce, NonceGenerator};
 use crate::runtime::{BlockResult, Runtime, WaitResult};
+use crate::sync::thread::ThreadId;
 use crate::table::memo::MemoTable;
 use crate::table::sync::SyncTable;
 use crate::table::Table;

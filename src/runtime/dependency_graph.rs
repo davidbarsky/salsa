@@ -1,9 +1,7 @@
-use std::sync::Arc;
-use std::thread::ThreadId;
-
 use crate::active_query::ActiveQuery;
 use crate::key::DatabaseKeyIndex;
 use crate::runtime::WaitResult;
+use crate::sync::{thread::ThreadId, Arc};
 use parking_lot::{Condvar, MutexGuard};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;

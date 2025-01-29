@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use crate::sync::Arc;
 
 use crate::{
     cycle::{CycleRecoveryStrategy, MAX_ITERATIONS},

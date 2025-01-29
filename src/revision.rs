@@ -1,5 +1,5 @@
+use crate::sync::atomic::{AtomicUsize, Ordering};
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Value of the initial revision, as a u64. We don't use 0
 /// because we want to use a `NonZeroUsize`.

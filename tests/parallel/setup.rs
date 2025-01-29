@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use salsa::sync::Arc;
 
 use crossbeam::atomic::AtomicCell;
 use salsa::Database;

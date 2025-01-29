@@ -1,10 +1,7 @@
 //! Test that a `tracked` fn with lru options
 //! compiles and executes successfully.
 
-use std::sync::{
-    atomic::{AtomicUsize, Ordering},
-    Arc,
-};
+use salsa::sync::{Arc, AtomicUsize, Ordering};
 
 mod common;
 use common::LogDatabase;
