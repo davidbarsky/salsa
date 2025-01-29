@@ -58,28 +58,25 @@ fn initial(_db: &dyn KnobsDatabase) -> CycleValue {
     MIN
 }
 
-#[cfg(feature = "shuttle")]
+#[cfg(feature = "loom")]
 #[test]
 fn the_test() {
-    shuttle::check_random(
-        || {
-            std::thread::scope(|scope| {
-                let db_t1 = Knobs::default();
-                let db_t2 = db_t1.clone();
+    loom::model(|| {
+        std::thread::scope(|scope| {
+            let db_t1 = Knobs::default();
+            let db_t2 = db_t1.clone();
 
-                // Thread 1:
-                scope.spawn(move || {
-                    let r = query_a(&db_t1);
-                    assert_eq!(r, MAX);
-                });
-
-                // Thread 2:
-                scope.spawn(move || {
-                    let r = query_b(&db_t2);
-                    assert_eq!(r, MAX);
-                });
+            // Thread 1:
+            scope.spawn(move || {
+                let r = query_a(&db_t1);
+                assert_eq!(r, MAX);
             });
-        },
-        10000,
-    );
+
+            // Thread 2:
+            scope.spawn(move || {
+                let r = query_b(&db_t2);
+                assert_eq!(r, MAX);
+            });
+        });
+    });
 }

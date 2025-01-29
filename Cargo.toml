@@ -21,7 +21,7 @@ parking_lot = "0.12"
 rustc-hash = "2"
 salsa-macro-rules = { version = "0.1.0", path = "components/salsa-macro-rules" }
 salsa-macros = { path = "components/salsa-macros" }
-shuttle = { version = "0.8.0", optional = true }
+loom = { version = "0.7.2", optional = true }
 smallvec = "1"
 rayon = "1.10.0"
 
@@ -38,7 +38,7 @@ test-log = { version ="0.2.11", features = ["trace"] }
 trybuild = "1.0"
 
 [features]
-shuttle = ["dep:shuttle"]
+loom = ["dep:loom"]
 
 [[bench]]
 name = "compare"
