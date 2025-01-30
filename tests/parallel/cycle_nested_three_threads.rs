@@ -69,7 +69,7 @@ fn initial(_db: &dyn KnobsDatabase) -> CycleValue {
     MIN
 }
 
-#[cfg(feature = "loom")]
+#[cfg(loom)]
 #[test]
 fn the_test() {
     loom::model(|| {

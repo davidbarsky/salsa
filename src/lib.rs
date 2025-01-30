@@ -1,4 +1,4 @@
-#[cfg(feature = "loom")]
+#[cfg(loom)]
 #[macro_use(thread_local)]
 extern crate loom;
 

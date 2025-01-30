@@ -21,7 +21,8 @@ parking_lot = "0.12"
 rustc-hash = "2"
 salsa-macro-rules = { version = "0.1.0", path = "components/salsa-macro-rules" }
 salsa-macros = { path = "components/salsa-macros" }
-loom = { version = "0.7.2", optional = true }
+[target.'cfg(loom)'.dependencies]
+loom = { version = "0.7", features = ["checkpoint"] }
 smallvec = "1"
 rayon = "1.10.0"
 
@@ -36,10 +37,6 @@ ordered-float = "4.2.1"
 rustversion = "1.0"
 test-log = { version ="0.2.11", features = ["trace"] }
 trybuild = "1.0"
-
-[features]
-loom = ["dep:loom"]
-default = ["loom"]
 
 [[bench]]
 name = "compare"
@@ -56,3 +53,6 @@ harness = false
 
 [workspace]
 members = ["components/salsa-macro-rules", "components/salsa-macros"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
