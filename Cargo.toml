@@ -39,6 +39,7 @@ trybuild = "1.0"
 
 [features]
 loom = ["dep:loom"]
+default = ["loom"]
 
 [[bench]]
 name = "compare"

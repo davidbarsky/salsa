@@ -1,5 +1,5 @@
 use crossbeam::atomic::AtomicCell;
-use parking_lot::Mutex;
+use crate::sync::Mutex;
 
 use crate::{id::FromId, Id};
 

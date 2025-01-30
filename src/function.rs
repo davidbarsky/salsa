@@ -1,4 +1,4 @@
-use std::{any::Any, fmt, sync::Arc};
+use std::{any::Any, fmt};
 
 use crate::{
     accumulator::accumulated_map::{AccumulatedMap, InputAccumulatedValues},
@@ -7,6 +7,7 @@ use crate::{
     key::DatabaseKeyIndex,
     plumbing::JarAux,
     salsa_struct::SalsaStructInDb,
+    sync::Arc,
     table::sync::ClaimResult,
     zalsa::{IngredientIndex, MemoIngredientIndex, Zalsa},
     zalsa_local::QueryOrigin,

@@ -4,7 +4,7 @@ use crate::Database;
 
 thread_local! {
     /// The thread-local state salsa requires for a given thread
-    static ATTACHED: Attached = const { Attached::new() }
+    static ATTACHED: Attached =  Attached::new()
 }
 
 /// State that is specific to a single execution thread.

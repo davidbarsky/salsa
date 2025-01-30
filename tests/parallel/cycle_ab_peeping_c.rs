@@ -62,20 +62,20 @@ fn query_c(db: &dyn KnobsDatabase) -> CycleValue {
 
 #[test]
 fn the_test() {
-    std::thread::scope(|scope| {
+    loom::model(|| {
         let db_t1 = Knobs::default();
 
         let db_t2 = db_t1.clone();
         db_t2.signal_on_will_block.store(2);
 
         // Thread 1:
-        scope.spawn(move || {
+        loom::thread::spawn(move || {
             let r = query_a(&db_t1);
             assert_eq!(r, MAX);
         });
 
         // Thread 2:
-        scope.spawn(move || {
+        loom::thread::spawn(move || {
             let r = query_c(&db_t2);
             assert_eq!(r, MAX);
         });

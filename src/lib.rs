@@ -1,3 +1,7 @@
+#[cfg(feature = "loom")]
+#[macro_use(thread_local)]
+extern crate loom;
+
 mod accumulator;
 mod active_query;
 mod array;

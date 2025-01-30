@@ -1,9 +1,7 @@
-use std::{
-    sync::atomic::{AtomicBool, Ordering},
-    thread::ThreadId,
-};
+use crate::sync::atomic::{AtomicBool, Ordering};
+use crate::sync::thread::ThreadId;
 
-use parking_lot::RwLock;
+use crate::sync::RwLock;
 
 use crate::{
     key::DatabaseKeyIndex,
@@ -44,9 +42,9 @@ impl SyncTable {
         database_key_index: DatabaseKeyIndex,
         memo_ingredient_index: MemoIngredientIndex,
     ) -> ClaimResult<'me> {
-        let mut syncs = self.syncs.write();
+        let mut syncs = self.syncs.write().unwrap();
         let zalsa = db.zalsa();
-        let thread_id = std::thread::current().id();
+        let thread_id = crate::sync::thread::current().id();
 
         util::ensure_vec_len(&mut syncs, memo_ingredient_index.as_usize() + 1);
 
@@ -95,7 +93,7 @@ pub(crate) struct ClaimGuard<'me> {
 
 impl ClaimGuard<'_> {
     fn remove_from_map_and_unblock_queries(&self, wait_result: WaitResult) {
-        let mut syncs = self.sync_table.syncs.write();
+        let mut syncs = self.sync_table.syncs.write().unwrap();
 
         let SyncState { anyone_waiting, .. } =
             syncs[self.memo_ingredient_index.as_usize()].take().unwrap();
@@ -111,7 +109,7 @@ impl ClaimGuard<'_> {
 
 impl Drop for ClaimGuard<'_> {
     fn drop(&mut self) {
-        let wait_result = if std::thread::panicking() {
+        let wait_result = if crate::sync::thread::panicking() {
             WaitResult::Panicked
         } else {
             WaitResult::Completed

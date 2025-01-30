@@ -1,8 +1,8 @@
-use crate::sync::Arc;
 use rustc_hash::FxHashSet;
 use std::any::Any;
 use std::fmt::Debug;
 use std::fmt::Formatter;
+use std::sync::Arc;
 
 use crossbeam::atomic::AtomicCell;
 

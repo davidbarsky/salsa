@@ -1,5 +1,6 @@
+use crate::sync::{Mutex, RwLock};
 use append_only_vec::AppendOnlyVec;
-use parking_lot::{Mutex, RwLock};
+use loom::lazy_static;
 use rustc_hash::FxHashMap;
 use std::any::{Any, TypeId};
 use std::marker::PhantomData;
@@ -63,8 +64,10 @@ pub fn views<Db: ?Sized + Database>(db: &Db) -> &Views {
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct StorageNonce;
 
-/// Generator for storage nonces.
-static NONCE: NonceGenerator<StorageNonce> = NonceGenerator::new();
+lazy_static! {
+    /// Generator for storage nonces.
+    static ref NONCE: NonceGenerator<StorageNonce> = NonceGenerator::new();
+}
 
 /// An ingredient index identifies a particular [`Ingredient`] in the database.
 ///
@@ -181,7 +184,7 @@ impl Zalsa {
     pub fn add_or_lookup_jar_by_type(&self, jar: &dyn Jar) -> IngredientIndex {
         {
             let jar_type_id = jar.type_id();
-            let mut jar_map = self.jar_map.lock();
+            let mut jar_map = self.jar_map.lock().unwrap();
             let mut should_create = false;
             // First record the index we will use into the map and then go and create the ingredients.
             // Those ingredients may invoke methods on the `JarAux` trait that read from this map
@@ -296,7 +299,7 @@ impl Zalsa {
         struct_ingredient_index: IngredientIndex,
         memo_ingredient_index: MemoIngredientIndex,
     ) -> IngredientIndex {
-        self.memo_ingredient_indices.read()[struct_ingredient_index.as_usize()]
+        self.memo_ingredient_indices.read().unwrap()[struct_ingredient_index.as_usize()]
             [memo_ingredient_index.as_usize()]
     }
 }
@@ -313,7 +316,7 @@ impl JarAux for JarAuxImpl<'_> {
         struct_ingredient_index: IngredientIndex,
         ingredient_index: IngredientIndex,
     ) -> MemoIngredientIndex {
-        let mut memo_ingredients = self.0.memo_ingredient_indices.write();
+        let mut memo_ingredients = self.0.memo_ingredient_indices.write().unwrap();
         let idx = struct_ingredient_index.as_usize();
         let memo_ingredients = if let Some(memo_ingredients) = memo_ingredients.get_mut(idx) {
             memo_ingredients

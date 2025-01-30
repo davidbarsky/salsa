@@ -1,14 +1,12 @@
-use std::{
-    mem,
-    sync::atomic::{AtomicBool, Ordering},
-    thread::ThreadId,
-};
+use crate::sync::atomic::{AtomicBool, Ordering};
+use std::mem;
 
-use parking_lot::Mutex;
+use crate::sync::Mutex;
 
 use crate::{
-    durability::Durability, key::DatabaseKeyIndex, revision::AtomicRevision, table::Table,
-    zalsa_local::ZalsaLocal, Cancelled, Database, Event, EventKind, Revision,
+    durability::Durability, key::DatabaseKeyIndex, revision::AtomicRevision,
+    sync::thread::ThreadId, table::Table, zalsa_local::ZalsaLocal, Cancelled, Database, Event,
+    EventKind, Revision,
 };
 
 use self::dependency_graph::DependencyGraph;
@@ -81,7 +79,11 @@ impl<V> StampedValue<V> {
 impl Default for Runtime {
     fn default() -> Self {
         Runtime {
-            revisions: [const { AtomicRevision::start() }; Durability::LEN],
+            revisions: [
+                AtomicRevision::start(),
+                AtomicRevision::start(),
+                AtomicRevision::start(),
+            ],
             revision_canceled: Default::default(),
             dependency_graph: Default::default(),
             table: Default::default(),
@@ -169,8 +171,8 @@ impl Runtime {
         other_id: ThreadId,
         query_mutex_guard: QueryMutexGuard,
     ) -> BlockResult {
-        let mut dg = self.dependency_graph.lock();
-        let thread_id = std::thread::current().id();
+        let mut dg = self.dependency_graph.lock().unwrap();
+        let thread_id = crate::sync::thread::current().id();
 
         if dg.depends_on(other_id, thread_id) {
             return BlockResult::Cycle;
@@ -218,6 +220,7 @@ impl Runtime {
     ) {
         self.dependency_graph
             .lock()
+            .unwrap()
             .unblock_runtimes_blocked_on(database_key, wait_result);
     }
 }
