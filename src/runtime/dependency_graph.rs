@@ -1,10 +1,8 @@
-use std::sync::Arc;
-use std::thread::ThreadId;
+use crate::sync::{thread::ThreadId, Arc, Condvar, MutexGuard};
 
 use crate::active_query::ActiveQuery;
 use crate::key::DatabaseKeyIndex;
 use crate::runtime::WaitResult;
-use parking_lot::{Condvar, MutexGuard};
 use rustc_hash::FxHashMap;
 use smallvec::SmallVec;
 
@@ -36,7 +34,7 @@ struct Edge {
 
     /// Signalled whenever a query with dependents completes.
     /// Allows those dependents to check if they are ready to unblock.
-    condvar: Arc<parking_lot::Condvar>,
+    condvar: Arc<Condvar>,
 }
 
 impl DependencyGraph {
@@ -196,7 +194,7 @@ impl DependencyGraph {
                 debug_assert!(!me.edges.contains_key(&from_id));
                 return stack_and_result;
             }
-            condvar.wait(&mut me);
+            me = condvar.wait(me).unwrap();
         }
     }
 
@@ -209,7 +207,7 @@ impl DependencyGraph {
         database_key: DatabaseKeyIndex,
         to_id: ThreadId,
         from_stack: QueryStack,
-    ) -> Arc<parking_lot::Condvar> {
+    ) -> Arc<Condvar> {
         assert_ne!(from_id, to_id);
         debug_assert!(!self.edges.contains_key(&from_id));
         debug_assert!(!self.depends_on(to_id, from_id));

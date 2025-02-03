@@ -1,14 +1,10 @@
-use std::{
-    mem,
-    panic::panic_any,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    thread::ThreadId,
-};
+use std::{mem, panic::panic_any};
 
-use parking_lot::Mutex;
+use crate::sync::{
+    atomic::{AtomicBool, Ordering},
+    thread::{self, ThreadId},
+    Arc, Mutex,
+};
 
 use crate::{
     active_query::ActiveQuery, cycle::CycleRecoveryStrategy, durability::Durability,
@@ -180,8 +176,8 @@ impl Runtime {
         other_id: ThreadId,
         query_mutex_guard: QueryMutexGuard,
     ) {
-        let mut dg = self.dependency_graph.lock();
-        let thread_id = std::thread::current().id();
+        let mut dg = self.dependency_graph.lock().unwrap();
+        let thread_id = thread::current().id();
 
         if dg.depends_on(other_id, thread_id) {
             self.unblock_cycle_and_maybe_throw(db, local_state, &mut dg, database_key, other_id);
@@ -245,7 +241,7 @@ impl Runtime {
         );
 
         let (me_recovered, others_recovered, cycle) = local_state.with_query_stack(|from_stack| {
-            let from_id = std::thread::current().id();
+            let from_id = thread::current().id();
 
             // Make a "dummy stack frame". As we iterate through the cycle, we will collect the
             // inputs from each participant. Then, if we are participating in cycle recovery, we
@@ -347,6 +343,7 @@ impl Runtime {
     ) {
         self.dependency_graph
             .lock()
+            .unwrap()
             .unblock_runtimes_blocked_on(database_key, wait_result);
     }
 }

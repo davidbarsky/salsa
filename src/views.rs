@@ -1,9 +1,7 @@
+use crate::sync::Arc;
 use crate::{zalsa::transmute_data_ptr, Database};
 use append_only_vec::AppendOnlyVec;
-use std::{
-    any::{Any, TypeId},
-    sync::Arc,
-};
+use std::any::{Any, TypeId};
 
 /// A `Views` struct is associated with some specific database type
 /// (a `DatabaseImpl<U>` for some existential `U`). It contains functions

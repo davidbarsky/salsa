@@ -10,12 +10,14 @@ rust-version = "1.76"
 
 [dependencies]
 arc-swap = "1"
+append-only-vec = "0.1.5"
 crossbeam = "0.8"
 dashmap = { version = "6", features = ["raw-api"] }
 hashlink = "0.9"
 hashbrown = "0.14.3"
 indexmap = "2"
-append-only-vec = "0.1.5"
+# loom = { version = "0.7.2", features = ["checkpoint"], optional = true }
+loom = { path = "../loom", features = ["checkpoint"], optional = true }
 tracing = "0.1"
 parking_lot = "0.12"
 rustc-hash = "2"
@@ -26,7 +28,8 @@ rayon = "1.10.0"
 
 [features]
 # FIXME: remove this as a default feature before 1.0.
-default = ["salsa_unstable"]
+default = ["salsa_unstable", "loom"]
+loom = ["dep:loom"]
 salsa_unstable = []
 
 [dev-dependencies]

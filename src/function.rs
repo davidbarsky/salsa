@@ -1,4 +1,6 @@
-use std::{any::Any, fmt, sync::Arc};
+use crate::sync::Arc;
+
+use std::{any::Any, fmt};
 
 use crate::{
     accumulator::accumulated_map::{AccumulatedMap, InputAccumulatedValues},

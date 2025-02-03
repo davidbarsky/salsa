@@ -1,6 +1,6 @@
-use std::{marker::PhantomData, panic::RefUnwindSafe, sync::Arc};
+use std::{marker::PhantomData, panic::RefUnwindSafe};
 
-use parking_lot::{Condvar, Mutex};
+use crate::sync::{Arc, Condvar, Mutex};
 
 use crate::{
     plumbing::{input, interned, tracked_struct},
@@ -118,9 +118,9 @@ impl<Db: Database> Storage<Db> {
 
         db.salsa_event(&|| Event::new(EventKind::DidSetCancellationFlag));
 
-        let mut clones = self.coordinate.clones.lock();
+        let mut clones = self.coordinate.clones.lock().unwrap();
         while *clones != 1 {
-            self.coordinate.cvar.wait(&mut clones);
+            clones = self.coordinate.cvar.wait(clones).unwrap();
         }
     }
     // ANCHOR_END: cancel_other_workers
@@ -154,7 +154,7 @@ impl<Db: Database> RefUnwindSafe for Storage<Db> {}
 
 impl<Db: Database> Clone for Storage<Db> {
     fn clone(&self) -> Self {
-        *self.coordinate.clones.lock() += 1;
+        *self.coordinate.clones.lock().unwrap() += 1;
 
         Self {
             zalsa_impl: self.zalsa_impl.clone(),
@@ -177,7 +177,7 @@ impl std::ops::Deref for CoordinateDrop {
 
 impl Drop for CoordinateDrop {
     fn drop(&mut self) {
-        *self.0.clones.lock() -= 1;
+        *self.0.clones.lock().unwrap() -= 1;
         self.0.cvar.notify_all();
     }
 }

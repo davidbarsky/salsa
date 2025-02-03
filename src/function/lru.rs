@@ -1,7 +1,6 @@
 use crate::{hash::FxLinkedHashSet, Id};
 
-use crossbeam::atomic::AtomicCell;
-use parking_lot::Mutex;
+use crate::sync::{AtomicCell, Mutex};
 
 #[derive(Default)]
 pub(super) struct Lru {
@@ -18,7 +17,7 @@ impl Lru {
             return None;
         }
 
-        let mut set = self.set.lock();
+        let mut set = self.set.lock().unwrap();
         set.insert(index);
         if set.len() > capacity {
             return set.pop_front();
@@ -31,7 +30,7 @@ impl Lru {
         self.capacity.store(capacity);
 
         if capacity == 0 {
-            let mut set = self.set.lock();
+            let mut set = self.set.lock().unwrap();
             *set = FxLinkedHashSet::default();
         }
     }

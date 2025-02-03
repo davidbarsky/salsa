@@ -1,11 +1,9 @@
 use std::{
     any::{Any, TypeId},
     fmt::Debug,
-    sync::Arc,
 };
 
-use arc_swap::ArcSwap;
-use parking_lot::RwLock;
+use crate::sync::{Arc, ArcSwap, RwLock};
 
 use crate::{zalsa::MemoIngredientIndex, zalsa_local::QueryOrigin};
 
@@ -71,12 +69,13 @@ impl MemoTable {
     }
 
     fn to_dyn_fn<M: Memo>() -> fn(Arc<DummyMemo>) -> Arc<dyn Memo> {
-        let f: fn(Arc<M>) -> Arc<dyn Memo> = |x| x;
-        unsafe {
-            std::mem::transmute::<fn(Arc<M>) -> Arc<dyn Memo>, fn(Arc<DummyMemo>) -> Arc<dyn Memo>>(
-                f,
-            )
-        }
+        todo!()
+        // let f: fn(Arc<M>) -> Arc<dyn Memo> = |x| x;
+        // unsafe {
+        //     std::mem::transmute::<fn(Arc<M>) -> Arc<dyn Memo>, fn(Arc<DummyMemo>) -> Arc<dyn Memo>>(
+        //         f,
+        //     )
+        // }
     }
 
     pub(crate) fn insert<M: Memo>(
@@ -93,7 +92,11 @@ impl MemoTable {
                     to_dyn_fn: _,
                     arc_swap,
                 }),
-        }) = self.memos.read().get(memo_ingredient_index.as_usize())
+        }) = self
+            .memos
+            .read()
+            .unwrap()
+            .get(memo_ingredient_index.as_usize())
         {
             assert_eq!(
                 *type_id,
@@ -113,7 +116,7 @@ impl MemoTable {
         memo_ingredient_index: MemoIngredientIndex,
         memo: Arc<M>,
     ) -> Option<Arc<M>> {
-        let mut memos = self.memos.write();
+        let mut memos = self.memos.write().unwrap();
         let memo_ingredient_index = memo_ingredient_index.as_usize();
         if memos.len() < memo_ingredient_index + 1 {
             memos.resize_with(memo_ingredient_index + 1, MemoEntry::default);
@@ -139,7 +142,7 @@ impl MemoTable {
         &self,
         memo_ingredient_index: MemoIngredientIndex,
     ) -> Option<Arc<M>> {
-        let memos = self.memos.read();
+        let memos = self.memos.read().unwrap();
 
         let Some(MemoEntry {
             data:
@@ -172,7 +175,7 @@ impl MemoTable {
     ) {
         // If the memo slot is already occupied, it must already have the
         // right type info etc, and we only need the read-lock.
-        let memos = self.memos.read();
+        let memos = self.memos.read().unwrap();
         let Some(MemoEntry {
             data:
                 Some(MemoEntryData {
@@ -197,6 +200,7 @@ impl MemoTable {
     pub(crate) fn into_memos(self) -> impl Iterator<Item = (MemoIngredientIndex, Arc<dyn Memo>)> {
         self.memos
             .into_inner()
+            .unwrap()
             .into_iter()
             .zip(0..)
             .filter_map(|(mut memo, index)| memo.data.take().map(|d| (d, index)))

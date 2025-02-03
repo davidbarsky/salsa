@@ -1,9 +1,8 @@
+use crate::sync::{Arc, AtomicCell};
+
 use std::any::Any;
 use std::fmt::Debug;
 use std::fmt::Formatter;
-use std::sync::Arc;
-
-use crossbeam::atomic::AtomicCell;
 
 use crate::accumulator::accumulated_map::InputAccumulatedValues;
 use crate::zalsa_local::QueryOrigin;

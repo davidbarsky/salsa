@@ -4,12 +4,16 @@ use std::{
     mem::MaybeUninit,
     panic::RefUnwindSafe,
     ptr, slice,
-    sync::atomic::{AtomicUsize, Ordering},
+};
+
+use crate::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Mutex,
 };
 
 use append_only_vec::AppendOnlyVec;
 use memo::MemoTable;
-use parking_lot::Mutex;
+
 use sync::SyncTable;
 
 use crate::{zalsa::transmute_data_ptr, Id, IngredientIndex, Revision};
@@ -185,11 +189,13 @@ impl Table {
 impl<T: Slot> Page<T> {
     #[allow(clippy::uninit_vec)]
     fn new(ingredient: IngredientIndex) -> Self {
+        let data =
+            std::array::from_fn::<_, PAGE_LEN, _>(|_| UnsafeCell::new(MaybeUninit::uninit()));
         Self {
             ingredient,
             allocated: Default::default(),
             allocation_lock: Default::default(),
-            data: Box::new([const { UnsafeCell::new(MaybeUninit::uninit()) }; PAGE_LEN]),
+            data: Box::new(data),
         }
     }
 

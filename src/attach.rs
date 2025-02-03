@@ -1,10 +1,12 @@
-use std::{cell::Cell, ptr::NonNull};
+use std::ptr::NonNull;
 
 use crate::Database;
 
+use crate::sync::{cell::Cell, thread_local};
+
 thread_local! {
     /// The thread-local state salsa requires for a given thread
-    static ATTACHED: Attached = const { Attached::new() }
+    static ATTACHED: Attached = Attached::new()
 }
 
 /// State that is specific to a single execution thread.
@@ -19,7 +21,7 @@ struct Attached {
 }
 
 impl Attached {
-    const fn new() -> Self {
+    fn new() -> Self {
         Self {
             database: Cell::new(None),
         }

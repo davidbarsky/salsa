@@ -1,4 +1,4 @@
-use std::thread::ThreadId;
+use crate::sync::thread::{self, ThreadId};
 
 use crate::{
     key::DatabaseKeyIndex,
@@ -20,7 +20,7 @@ pub struct Event {
 impl Event {
     pub fn new(kind: EventKind) -> Self {
         Self {
-            thread_id: std::thread::current().id(),
+            thread_id: thread::current().id(),
             kind,
         }
     }
