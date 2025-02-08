@@ -27,13 +27,13 @@ pub trait SalsaStructInDb: Sized {
     /// #[salsa::interned]
     /// struct Interned2 {}
     ///
-    /// #[derive(Debug, salsa::Enum)]
+    /// #[derive(Debug, salsa::Supertype)]
     /// enum InnerEnum {
     ///     Input(Input),
     ///     Interned1(Interned1),
     /// }
     ///
-    /// #[derive(Debug, salsa::Enum)]
+    /// #[derive(Debug, salsa::Supertype)]
     /// enum OuterEnum {
     ///     InnerEnum(InnerEnum),
     ///     Interned2(Interned2),

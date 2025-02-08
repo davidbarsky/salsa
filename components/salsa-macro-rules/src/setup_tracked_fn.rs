@@ -208,7 +208,9 @@ macro_rules! setup_tracked_fn {
             }
 
             impl $zalsa::Jar for $Configuration {
-                fn create_dependencies(zalsa: &$zalsa::Zalsa) -> $zalsa::IngredientIndices
+                type Struct = $InternedData<'static>;
+
+                fn create_tracked_fn_struct_dependencies(zalsa: &$zalsa::Zalsa) -> $zalsa::IngredientIndices
                 where
                     Self: Sized
                 {
@@ -254,10 +256,6 @@ macro_rules! setup_tracked_fn {
                             ]
                         }
                     }
-                }
-
-                fn id_struct_type_id() -> $zalsa::TypeId {
-                    $zalsa::TypeId::of::<$InternedData<'static>>()
                 }
             }
 

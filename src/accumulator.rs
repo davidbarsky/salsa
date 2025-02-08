@@ -1,7 +1,7 @@
 //! Basic test of accumulator functionality.
 
 use std::{
-    any::{Any, TypeId},
+    any::Any,
     fmt::{self, Debug},
     marker::PhantomData,
 };
@@ -45,16 +45,14 @@ impl<A: Accumulator> Default for JarImpl<A> {
 }
 
 impl<A: Accumulator> Jar for JarImpl<A> {
+    type Struct = A;
+
     fn create_ingredients(
         _zalsa: &Zalsa,
         first_index: IngredientIndex,
         _dependencies: IngredientIndices,
     ) -> Vec<Box<dyn Ingredient>> {
         vec![Box::new(<IngredientImpl<A>>::new(first_index))]
-    }
-
-    fn id_struct_type_id() -> TypeId {
-        TypeId::of::<A>()
     }
 }
 
