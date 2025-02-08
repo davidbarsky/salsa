@@ -11,7 +11,6 @@ use crate::table::Slot;
 use crate::zalsa::{IngredientIndex, Zalsa};
 use crate::zalsa_local::QueryOrigin;
 use crate::{Database, DatabaseKeyIndex, Id};
-use std::any::TypeId;
 use std::fmt;
 use std::hash::{BuildHasher, Hash, Hasher};
 use std::marker::PhantomData;
@@ -99,16 +98,13 @@ impl<C: Configuration> Default for JarImpl<C> {
 }
 
 impl<C: Configuration> Jar for JarImpl<C> {
+    type Struct = C::Struct<'static>;
     fn create_ingredients(
         _zalsa: &Zalsa,
         first_index: IngredientIndex,
         _dependencies: IngredientIndices,
     ) -> Vec<Box<dyn Ingredient>> {
         vec![Box::new(IngredientImpl::<C>::new(first_index)) as _]
-    }
-
-    fn id_struct_type_id() -> TypeId {
-        TypeId::of::<C::Struct<'static>>()
     }
 }
 

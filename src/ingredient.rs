@@ -17,12 +17,15 @@ use super::Revision;
 /// A "jar" is a group of ingredients that are added atomically.
 /// Each type implementing jar can be added to the database at most once.
 pub trait Jar: Any {
-    /// This creates the ingredient dependencies of this jar. We need to split this from `create_ingredients()`
+    /// The struct that wraps `salsa::Id` and carries the name of the jar.
+    type Struct: 'static;
+
+    /// This creates the struct ingredient dependencies of this jar. We need to split this from `create_ingredients()`
     /// because while `create_ingredients()` is called, a lock on the ingredient map is held (to guarantee
     /// atomicity), so other ingredients could not be created.
     ///
-    /// Only tracked fns use this.
-    fn create_dependencies(_zalsa: &Zalsa) -> IngredientIndices
+    /// Only tracked fns use this to be able to create `#[derive(Supertype)]` enums.
+    fn create_tracked_fn_struct_dependencies(_zalsa: &Zalsa) -> IngredientIndices
     where
         Self: Sized,
     {
@@ -36,12 +39,6 @@ pub trait Jar: Any {
         first_index: IngredientIndex,
         dependencies: IngredientIndices,
     ) -> Vec<Box<dyn Ingredient>>
-    where
-        Self: Sized;
-
-    /// This returns the [`TypeId`] of the ID struct, that is, the struct that wraps `salsa::Id`
-    /// and carry the name of the jar.
-    fn id_struct_type_id() -> TypeId
     where
         Self: Sized;
 }

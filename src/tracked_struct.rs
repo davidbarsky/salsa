@@ -1,4 +1,4 @@
-use std::{any::TypeId, fmt, hash::Hash, marker::PhantomData, ops::DerefMut};
+use std::{fmt, hash::Hash, marker::PhantomData, ops::DerefMut};
 
 use crossbeam::{atomic::AtomicCell, queue::SegQueue};
 use tracked_field::FieldIngredientImpl;
@@ -106,6 +106,8 @@ impl<C: Configuration> Default for JarImpl<C> {
 }
 
 impl<C: Configuration> Jar for JarImpl<C> {
+    type Struct = C::Struct<'static>;
+
     fn create_ingredients(
         _zalsa: &Zalsa,
         struct_index: crate::zalsa::IngredientIndex,
@@ -125,10 +127,6 @@ impl<C: Configuration> Jar for JarImpl<C> {
         std::iter::once(Box::new(struct_ingredient) as _)
             .chain(tracked_field_ingredients)
             .collect()
-    }
-
-    fn id_struct_type_id() -> TypeId {
-        TypeId::of::<C::Struct<'static>>()
     }
 }
 

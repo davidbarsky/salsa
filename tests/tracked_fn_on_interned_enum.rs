@@ -51,6 +51,20 @@ fn tracked_fn2<'db>(db: &'db dyn salsa::Database, enum_: EnumOfEnum<'db>) -> Str
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, salsa::supertype)]
+enum EnumAmbiguousVariants {
+    Age(Age),
+    SecondAge(Age),
+}
+
+#[salsa::tracked]
+fn tracked_fn3<'db>(db: &'db dyn salsa::Database, enum_: EnumAmbiguousVariants) -> String {
+    match enum_ {
+        EnumAmbiguousVariants::Age(age) => age.age(db).to_string(),
+        EnumAmbiguousVariants::SecondAge(_) => unreachable!("we should always pick the first"),
+    }
+}
+
 #[test]
 fn execute() {
     let db = salsa::DatabaseImpl::new();
@@ -89,5 +103,11 @@ fn execute() {
             EnumOfEnum::Input(Input::new(&db, "Hello world!".to_string()))
         ),
         "Hello world!"
+    );
+
+    assert_eq!(tracked_fn3(&db, EnumAmbiguousVariants::Age(age)), "123");
+    assert_eq!(
+        tracked_fn3(&db, EnumAmbiguousVariants::SecondAge(age)),
+        "123"
     );
 }

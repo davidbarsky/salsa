@@ -1,8 +1,4 @@
-use std::{
-    any::{Any, TypeId},
-    fmt,
-    ops::DerefMut,
-};
+use std::{any::Any, fmt, ops::DerefMut};
 
 pub mod input_field;
 pub mod setter;
@@ -54,6 +50,8 @@ impl<C: Configuration> Default for JarImpl<C> {
 }
 
 impl<C: Configuration> Jar for JarImpl<C> {
+    type Struct = C::Struct;
+
     fn create_ingredients(
         _zalsa: &Zalsa,
         struct_index: crate::zalsa::IngredientIndex,
@@ -66,10 +64,6 @@ impl<C: Configuration> Jar for JarImpl<C> {
                 Box::new(<FieldIngredientImpl<C>>::new(struct_index, field_index)) as _
             }))
             .collect()
-    }
-
-    fn id_struct_type_id() -> TypeId {
-        TypeId::of::<C::Struct>()
     }
 }
 

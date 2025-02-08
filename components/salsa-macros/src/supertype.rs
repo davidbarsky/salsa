@@ -1,11 +1,6 @@
 use crate::token_stream_with_error;
 use proc_macro2::TokenStream;
 
-/// For an entity struct `Foo` with fields `f1: T1, ..., fN: TN`, we generate...
-///
-/// * the "id struct" `struct Foo(salsa::Id)`
-/// * the entity ingredient, which maps the id fields to the `Id`
-/// * for each value field, a function ingredient
 pub(crate) fn supertype(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let enum_item = parse_macro_input!(input as syn::ItemEnum);
     match enum_impl(enum_item) {

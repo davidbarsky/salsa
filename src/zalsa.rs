@@ -1,5 +1,5 @@
 use append_only_vec::AppendOnlyVec;
-use parking_lot::{Mutex, RwLock};
+use parking_lot::RwLock;
 use rustc_hash::FxHashMap;
 use std::any::{Any, TypeId};
 use std::collections::hash_map;
@@ -7,7 +7,6 @@ use std::marker::PhantomData;
 use std::thread::ThreadId;
 
 use crate::cycle::CycleRecoveryStrategy;
-use crate::hash::FxDashMap;
 use crate::ingredient::{Ingredient, Jar};
 use crate::nonce::{Nonce, NonceGenerator};
 use crate::runtime::{Runtime, WaitResult};
@@ -130,16 +129,20 @@ pub struct Zalsa {
     /// as input.
     memo_ingredient_indices: RwLock<Vec<Vec<IngredientIndex>>>,
 
-    /// Map from the type-id of an `impl Jar` to the index of its first ingredient.
-    /// This is using a `Mutex<FxHashMap>` (versus, say, a `FxDashMap`)
+    /// First map from the type-id of an `impl Jar` to the index of its first ingredient.
+    /// Second map from the ingredient index of the argument struct to its type-id.
+    ///
+    /// This is using an `RwLock<(FxHashMap, FxHashMap)>` (versus, say, two `FxDashMap`)
     /// so that we can protect `ingredients_vec` as well and predict what the
     /// first ingredient index will be. This allows ingredients to store their own indices.
     /// This may be worth refactoring in the future because it naturally adds more overhead to
     /// adding new kinds of ingredients.
-    jar_map: Mutex<FxHashMap<TypeId, IngredientIndex>>,
-
-    /// A map from the `IngredientIndex` to the `TypeId` of its ID struct.
-    ingredient_to_id_struct_type_id_map: FxDashMap<IngredientIndex, TypeId>,
+    /// We also want them to be behind the same lock as insertion in one will insert into the other
+    /// as well.
+    jar_map: RwLock<(
+        FxHashMap<TypeId, IngredientIndex>,
+        FxHashMap<IngredientIndex, TypeId>,
+    )>,
 
     /// Vector of ingredients.
     ///
@@ -160,7 +163,6 @@ impl Zalsa {
             views_of: Views::new::<Db>(),
             nonce: NONCE.nonce(),
             jar_map: Default::default(),
-            ingredient_to_id_struct_type_id_map: Default::default(),
             ingredients_vec: AppendOnlyVec::new(),
             ingredients_requiring_reset: AppendOnlyVec::new(),
             runtime: Runtime::default(),
@@ -216,7 +218,9 @@ impl Zalsa {
     pub fn lookup_page_type_id(&self, id: Id) -> TypeId {
         let ingredient_index = self.ingredient_index(id);
         *self
-            .ingredient_to_id_struct_type_id_map
+            .jar_map
+            .read()
+            .1
             .get(&ingredient_index)
             .expect("should have the ingredient index available")
     }
@@ -224,22 +228,21 @@ impl Zalsa {
     /// **NOT SEMVER STABLE**
     pub fn add_or_lookup_jar_by_type<J: Jar>(&self) -> IngredientIndex {
         let jar_type_id = TypeId::of::<J>();
-        let mut jar_map = self.jar_map.lock();
-        if let Some(index) = jar_map.get(&jar_type_id) {
-            return *index;
-        };
-        drop(jar_map);
-        let dependencies = J::create_dependencies(self);
+        if let Some(&index) = self.jar_map.read().0.get(&jar_type_id) {
+            return index;
+        }
+        let dependencies = J::create_tracked_fn_struct_dependencies(self);
 
-        jar_map = self.jar_map.lock();
+        let (jar_map, inv_jar_map) = &mut *self.jar_map.write();
+
         let index = IngredientIndex::from(self.ingredients_vec.len());
         match jar_map.entry(jar_type_id) {
-            hash_map::Entry::Occupied(entry) => {
-                // Someone made it earlier than us.
-                return *entry.get();
-            }
+            // Someone inserted it while we dropped the lock.
+            hash_map::Entry::Occupied(entry) => return *entry.get(),
             hash_map::Entry::Vacant(entry) => entry.insert(index),
         };
+        inv_jar_map.insert(index, TypeId::of::<J::Struct>());
+
         let ingredients = J::create_ingredients(self, index, dependencies);
         for ingredient in ingredients {
             let expected_index = ingredient.ingredient_index();
@@ -258,10 +261,6 @@ impl Zalsa {
                 actual_index,
             );
         }
-
-        drop(jar_map);
-        self.ingredient_to_id_struct_type_id_map
-            .insert(index, J::id_struct_type_id());
 
         index
     }
