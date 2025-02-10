@@ -1,5 +1,5 @@
 use crate::{zalsa::transmute_data_ptr, Database};
-use append_only_vec::AppendOnlyVec;
+use boxcar::Vec;
 use std::{
     any::{Any, TypeId},
     sync::Arc,
@@ -24,7 +24,7 @@ use std::{
 #[derive(Clone)]
 pub struct Views {
     source_type_id: TypeId,
-    view_casters: Arc<AppendOnlyVec<DynViewCaster>>,
+    view_casters: Arc<Vec<DynViewCaster>>,
 }
 
 /// A DynViewCaster contains a manual trait object that can cast from the
@@ -78,7 +78,7 @@ impl Views {
         let source_type_id = TypeId::of::<Db>();
         Self {
             source_type_id,
-            view_casters: Arc::new(AppendOnlyVec::new()),
+            view_casters: Arc::new(Vec::new()),
         }
     }
 
@@ -91,7 +91,7 @@ impl Views {
         if self
             .view_casters
             .iter()
-            .any(|u| u.target_type_id == target_type_id)
+            .any(|(_, u)| u.target_type_id == target_type_id)
         {
             return;
         }
@@ -120,7 +120,7 @@ impl Views {
         assert_eq!(self.source_type_id, db_type_id, "database type mismatch");
 
         let view_type_id = TypeId::of::<DbView>();
-        for view in self.view_casters.iter() {
+        for (_idx, view) in self.view_casters.iter() {
             if view.target_type_id == view_type_id {
                 // SAFETY: We verified that this is the view caster for the
                 // `DbView` type by checking type IDs above.
